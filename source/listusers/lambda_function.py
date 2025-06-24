@@ -28,7 +28,7 @@ def initialize_clients():
     sso = boto3.client('sso-admin')
     identity_store_id = sso.list_instances()['Instances'][0]['IdentityStoreId']
     
-    return identitystore, sso_admin, dynamodb, identity_store_id, instance_arn
+    return identitystore, dynamodb, identity_store_id
 
 def lambda_handler(event, context):
 
