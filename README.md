@@ -38,7 +38,7 @@ We can most information from two different sets of Identity Center APIs:
 1. [Identity Store](https://docs.aws.amazon.com/singlesignon/latest/IdentityStoreAPIReference/welcome.html) 
 2. [Identity Center](https://docs.aws.amazon.com/singlesignon/latest/APIReference/welcome.html)
 
-Lastly we also want to bring in Unused Access findings and Internal Access findings from [IAM Access Analyzer](https://docs.aws.amazon.com/IAM/latest/UserGuide/what-is-access-analyzer.html), which we will do using EventBridge. To achieve this, the solution needs to have [Unused Access Analyzer](https://docs.aws.amazon.com/IAM/latest/UserGuide/access-analyzer-create-unused.html) and [Internal Access Analyzer](https://docs.aws.amazon.com/IAM/latest/UserGuide/access-analyzer-create-internal.html) setup.
+Lastly we also want to bring in Unused Access findings and Internal Access findings from IAM Access Analyzer, which we will do using EventBridge. To achieve this, we need to setup [Unused Access Analyzer](https://docs.aws.amazon.com/IAM/latest/UserGuide/access-analyzer-create-unused.html) and [Internal Access Analyzer](https://docs.aws.amazon.com/IAM/latest/UserGuide/access-analyzer-create-internal.html) in order to ingest findings. 
 
 However, there are also things we need to build the relationships, such as the relation between principals and permission sets, and, are provisioned into each account part of the AWS IAM Identity Center deployments. 
 
