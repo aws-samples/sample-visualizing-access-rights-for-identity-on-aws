@@ -1,0 +1,54 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'Create IAM role for IAM role inventory with read-only permissions, assumable by IdCInventoryAccessRole'
+
+Parameters:
+  TrustedAccountId:
+    Type: String
+    Description: AWS Account ID containing the AriaIdCInventoryAccessRole
+  IAMRolesLambdaCrossAccountRole:
+    Type: String
+    Description: IAM role of Lambda running in other account to assume to perform cross-account operations
+    Default: 'arn:aws:iam::<01234567890>:role/<stack-name>-GetIAMRolesLambdaExecutionRole-<randomchars>'
+
+Resources:
+  AriaIdCInventoryAccessRole:
+    Type: 'AWS::IAM::Role'
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W11
+            reason: The Lambda function that will assume this role requires the ability to list all roles and all attached role policies in the AWS account
+          - id: W28
+            reason: The role name is set here so that it can be referenced in the main CloudFormation template without any user input
+    Properties:
+      RoleName: 'AriaIdCInventoryAccessRole-LimitedReadOnly'
+      Description: 'Role for reading IdC IAM role information across accounts'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              AWS: !Sub 'arn:aws:iam::${TrustedAccountId}:root'
+            Action: sts:AssumeRole
+            Condition:
+              StringEquals:
+                'aws:PrincipalArn': !Ref IAMRolesLambdaCrossAccountRole
+      Policies:
+        - PolicyName: 'AriaIdCInventoryAccessRole-LimitedReadOnlyPolicy'
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - iam:ListRoles
+                  - iam:ListAttachedRolePolicies
+                Resource:
+                  - '*'
+      Tags: 
+        - Key: aria
+          Value: role
+
+Outputs:
+  RoleARN:
+    Description: 'ARN of the created IAM role'
+    Value: !GetAtt AriaIdCInventoryAccessRole.Arn

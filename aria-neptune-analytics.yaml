@@ -1,0 +1,333 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'CloudFormation template to deploy Neptune graph and notebook instance'
+
+Parameters:
+  AriaSetupStackName:
+    Type: String
+    Description: 'Name of the main Aria setup stack'
+    Default: 'aria-setup'
+
+  S3ExportBucketName:
+    Type: AWS::SSM::Parameter::Value<String>
+    Description: Name of the SSM parameter containing the S3 bucket to export all IdC csv data to
+    Default: 'aria-export-bucket'
+  
+  GraphName:
+    Type: String
+    Description: 'Name of the Neptune graph'
+    Default: 'aria-identitycenter'
+
+  PublicIPAddress:
+    Type: String
+    Description: Provide your public IP address in CIDR format e.g. 1.2.3.4/32
+    Default: '0.0.0.0/0'
+    
+Resources: 
+  # VPC Configuration
+  NeptuneVPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 172.32.0.0/16
+      EnableDnsHostnames: true
+      EnableDnsSupport: true
+      Tags:
+        - Key: aria
+          Value: vpc
+
+  # Subnets
+  NeptunePrivateSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref NeptuneVPC
+      CidrBlock: 172.32.1.0/24
+      AvailabilityZone: !Select [0, !GetAZs '']
+      Tags:
+        - Key: aria
+          Value: private-subnet-1
+
+  NeptunePrivateSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref NeptuneVPC
+      CidrBlock: 172.32.2.0/24
+      AvailabilityZone: !Select [1, !GetAZs '']
+      Tags:
+        - Key: aria
+          Value: private-subnet-2
+
+  # Security Group
+  NeptuneAnalyticsSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: F1000
+            reason: Permitting egress traffic is a requirement of Neptune Analytics
+          - id: W2
+            reason: This is required for Neptune to function as per documentation
+          - id: W60
+            reason: This is an example solution so not required however in a production implementation vpc flow logs should be enabled
+          - id: W9
+            reason: This is required for Neptune to function as per documentation
+    Properties:
+      GroupDescription: Security group for Neptune Analytics VPC endpoint
+      GroupName: ${AWS::StackName}-NeptuneAnalyticsSG
+      VpcId: !Ref NeptuneVPC
+      SecurityGroupIngress:
+        - Description: Allow ingress from external IP address to Neptune Analytics
+          IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: !Sub ${PublicIPAddress}
+        - Description: Allow ability to pull libraries
+          IpProtocol: tcp
+          FromPort: 8182
+          ToPort: 8182
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: aria
+          Value: neptune-analytics-security-group
+
+  # VPC Endpoints - Neptune Control Plane
+  NeptuneAnalyticsVPCEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      ServiceName: !Sub com.amazonaws.${AWS::Region}.neptune-graph
+      VpcId: !Ref NeptuneVPC
+      VpcEndpointType: Interface
+      SubnetIds:
+        - !Ref NeptunePrivateSubnet1
+        - !Ref NeptunePrivateSubnet2
+      SecurityGroupIds:
+        - !Ref NeptuneAnalyticsSecurityGroup
+      PrivateDnsEnabled: true
+      Tags:
+        - Key: aria
+          Value: neptune-analytics-vpc-graph-endpoint
+ 
+  # VPC Endpoints - Neptune Data Plane
+  NeptuneAnalyticsVPCDataEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      ServiceName: !Sub com.amazonaws.${AWS::Region}.neptune-graph-data
+      VpcId: !Ref NeptuneVPC
+      VpcEndpointType: Interface
+      SubnetIds:
+        - !Ref NeptunePrivateSubnet1
+        - !Ref NeptunePrivateSubnet2
+      SecurityGroupIds:
+        - !Ref NeptuneAnalyticsSecurityGroup
+      PrivateDnsEnabled: true
+      Tags:
+        - Key: aria
+          Value: neptune-analytics-vpc-graph-data-endpoint
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: "*"
+            Action: "neptune-graph:*"
+            Resource: !Sub "arn:${AWS::Partition}:neptune-graph:${AWS::Region}:${AWS::AccountId}:graph/${CreateNeptuneAnalytics}"
+
+
+  CreateNeptuneLoadRole: #Role to load data into Neptune analytics
+    Type: 'AWS::IAM::Role'
+    Properties:
+      AssumeRolePolicyDocument: 
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - neptune-graph.amazonaws.com
+            Action:
+              - 'sts:AssumeRole'
+      Description: Role to load data into Neptune analytics
+      ManagedPolicyArns: 
+        - arn:aws:iam::aws:policy/AmazonS3ReadOnlyAccess
+      Tags: 
+        - Key: aria
+          Value: role
+
+  CreateNeptuneAnalytics: #Create Neptune Analytics Graph
+    Type: 'AWS::NeptuneGraph::Graph'
+    Properties:
+      DeletionProtection: False
+      GraphName: !Ref GraphName
+      ProvisionedMemory: 16
+      PublicConnectivity: false
+      ReplicaCount: 0
+      Tags: 
+        - Key: 'Name'
+          Value: !Ref GraphName
+        - Key: aria
+          Value: analyticsgraph
+
+    # Private Graph Endpoint
+  PrivateGraphEndpoint:
+    Type: AWS::NeptuneGraph::PrivateGraphEndpoint
+    Properties:
+      GraphIdentifier: !Ref CreateNeptuneAnalytics
+      VpcId: !Ref NeptuneVPC
+      SubnetIds: 
+        - !Ref NeptunePrivateSubnet1
+        - !Ref NeptunePrivateSubnet2
+      SecurityGroupIds:
+        - !Ref NeptuneAnalyticsSecurityGroup
+
+  AriaExportGraphStateMachine:
+    Type: 'AWS::StepFunctions::StateMachine'
+    Properties:
+      Definition:
+        Comment: This state machine will export DynamoDB data to CSV in graph format and import data into a Neptune graph
+        StartAt: S3 Export Lambda Function
+        States:
+          S3 Export Lambda Function:
+            Type: Task
+            Resource: arn:aws:states:::lambda:invoke
+            Output: '{% $states.result.Payload %}'
+            Arguments:
+              FunctionName: !Sub 'arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:${AriaSetupStackName}-S3Export-function'
+              Payload: { "s3bucket": !Ref S3ExportBucketName }
+            Retry:
+              - ErrorEquals:
+                  - Lambda.ServiceException
+                  - Lambda.AWSLambdaException
+                  - Lambda.SdkClientException
+                  - Lambda.TooManyRequestsException
+                IntervalSeconds: 1
+                MaxAttempts: 3
+                BackoffRate: 2
+                JitterStrategy: FULL
+            Next: Reset Neptune Graph
+          Reset Neptune Graph:
+            Type: Task
+            Arguments:
+              GraphIdentifier: !GetAtt CreateNeptuneAnalytics.GraphId
+              SkipSnapshot: 'true'
+            Resource: arn:aws:states:::aws-sdk:neptunegraph:resetGraph
+            Next: Wait
+          Wait:
+            Type: Wait
+            Seconds: 120
+            Next: Start Neptune Import Task
+          Start Neptune Import Task:
+            Type: Task
+            Resource: arn:aws:states:::aws-sdk:neptunegraph:startImportTask
+            Arguments:
+              GraphIdentifier: !GetAtt CreateNeptuneAnalytics.GraphId
+              RoleArn: !GetAtt CreateNeptuneLoadRole.Arn
+              Source: !Sub 's3://${S3ExportBucketName}/'
+              Format: CSV
+            Next: Wait2
+          Wait2:
+            Type: Wait
+            Seconds: 180
+            End: true
+        QueryLanguage: JSONata
+      RoleArn:
+        Fn::GetAtt:
+          - AriaExportStateMachineRole
+          - Arn
+      StateMachineName: AriaExportGraphStateMachine
+      StateMachineType: STANDARD
+      EncryptionConfiguration:
+        Type: AWS_OWNED_KEY
+      LoggingConfiguration:
+        Level: 'OFF'
+        IncludeExecutionData: false
+      Tags: 
+        - Key: aria
+          Value: state
+
+  AriaExportStateMachineRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:    
+          - Effect: Allow
+            Principal:
+              Service: states.amazonaws.com
+            Action: sts:AssumeRole
+      MaxSessionDuration: 3600
+      Tags: 
+        - Key: aria
+          Value: role
+  AriaExportStateMachineRolePolicy:
+    Type: AWS::IAM::RolePolicy
+    Properties:
+      PolicyName: StateMachineNeptuneScopedAccessPolicy
+      RoleName:
+        Ref: AriaExportStateMachineRole
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Action:
+              - 'neptune-graph:ResetGraph'
+              - 'neptune-graph:StartImportTask'
+              - 'neptune-graph:CreateGraphSnapshot'
+            Resource:
+              - '*'
+          - Effect: Allow
+            Action:
+              - 'lambda:InvokeFunction'
+            Resource: 
+              - Fn::ImportValue: 
+                  Fn::Sub: '${AriaSetupStackName}-S3ExportLambdaFunctionArn'
+          - Effect: Allow
+            Action:
+              - iam:PassRole
+            Resource:
+              - !GetAtt CreateNeptuneLoadRole.Arn
+          - Effect: Allow
+            Action:
+              - 's3:ListBucket'
+              - 's3:GetObject'
+              - 's3:PutObject'
+            Resource:
+              - !Sub 'arn:aws:s3:::${S3ExportBucketName}/*'
+              - !Sub 'arn:aws:s3:::${S3ExportBucketName}'
+            
+Outputs:
+  NeptuneGraphEndpoint: 
+    Value: !GetAtt CreateNeptuneAnalytics.Endpoint
+    Export:
+      Name: 'NeptuneGraphEndpoint'
+  NeptuneGraphId: 
+    Value: !GetAtt CreateNeptuneAnalytics.GraphId
+    Export:
+      Name: 'NeptuneGraphId'
+  NeptuneGraphName: 
+    Value: !Ref GraphName
+    Export:
+      Name: 'NeptuneGraphName'
+  NeptuneGraphArn: 
+    Value: !GetAtt CreateNeptuneAnalytics.GraphArn
+  CreateNeptuneLoadRole:
+    Value: !GetAtt CreateNeptuneLoadRole.Arn
+  NeptuneVPC:
+    Value: !GetAtt NeptuneVPC.VpcId
+    Export:
+      Name: !Sub '${AWS::StackName}-VPC'
+  NeptunePrivateSubnet1:
+    Value: !GetAtt NeptunePrivateSubnet1.SubnetId
+    Export:
+      Name: !Sub '${AWS::StackName}-PrivateSubnet1'
+  NeptunePrivateSubnet2:
+    Value: !GetAtt NeptunePrivateSubnet2.SubnetId
+    Export:
+      Name: !Sub '${AWS::StackName}-PrivateSubnet2'
+  NeptuneAnalyticsSecurityGroup:
+    Value: !GetAtt NeptuneAnalyticsSecurityGroup.GroupId
+    Export:
+      Name: !Sub '${AWS::StackName}-NeptuneAnalyticsSecurityGroup'
+  NeptuneAnalyticsVPCEndpoint:
+    Value: !GetAtt NeptuneAnalyticsVPCEndpoint.Id
+    Export:
+      Name: !Sub '${AWS::StackName}-NeptuneAnalyticsVPCEndpoint'
+  NeptuneAnalyticsVPCDataEndpoint:
+    Value: !GetAtt NeptuneAnalyticsVPCDataEndpoint.Id
+    Export:
+      Name: !Sub '${AWS::StackName}-NeptuneAnalyticsVPCDataEndpoint'
