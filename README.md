@@ -1,6 +1,59 @@
 # Welcome to ARIA-gv (Access Rights for Identity on AWS - graph visualization)
 
-## Getting started
+NOTE: This was a Code Talk session from re:Inforce 2025 - IAM341, presented by Meg Peddada and Alex Waddell.
+
+## What are the challenges we are trying to solve?
+Customers connect their Identity Provider (IdP) to AWS IAM Identity Center to enable easier management of access to AWS applications and accounts. This single connection then allows users & groups from the IdP to be easily synchronised to Identity Center and used to provide access to (for example) AWS Accounts.
+
+![AWS IAM Identity Center](/img/idc.png)
+
+This helps Identity administrators to manage AWS access more simply through IdP group membership. However those same Identity teams are also being asked questions like
+
+*“Who in our company can access our cloud resources and what can they do to them?”*
+
+*“Can you show me how Bob was able to update the customer data in our production account?”*
+
+*“Do users with access to our cloud resources have access rights that follow least privilege?”*
+
+*“Can you give me a report of everything that Alice has access to in our production account?”*
+
+Some challenges when attempting to answer those questions are:
+
+* Basing resource access assumptions on IdP group membership doesn’t tell the whole story
+* Resource access may be granted using a combination of
+  * Identity-based policies
+  * Resource-based policies
+  * Service Control Policies (SCPs)
+  * Resource Control Policies (RCPs)
+  * Permissions Boundaries
+  * Session Policies
+* Teams might deploy custom IAM roles & policies into accounts
+* Providing AWS account & resource access visibility to teams beyond just CloudOps
+
+## So what can we do?
+
+We need to get data from AWS Identity and Access Management, AWS IAM Identity Center and also AWS IAM Access Analyzer. Fortunately there are APIs that we can use to get most of it. Then, we can process and enrich that data and put it into the right format for visualizing it.
+
+We can most information from two different sets of Identity Center APIs:
+1. [Identity Store](https://docs.aws.amazon.com/singlesignon/latest/IdentityStoreAPIReference/welcome.html) 
+2. [Identity Center](https://docs.aws.amazon.com/singlesignon/latest/APIReference/welcome.html)
+
+Lastly we also want to bring in Unused Access findings and Internal Access findings from [IAM Access Analyzer](https://docs.aws.amazon.com/IAM/latest/UserGuide/what-is-access-analyzer.html), which we will do using EventBridge. To to this, the solution needs to have Unused Access Analyzer and Internal Access Analyzers setup, look
+* [here](https://docs.aws.amazon.com/IAM/latest/UserGuide/access-analyzer-create-unused.html) to find out how to create an Unused Access Analyzer, and
+* [here](https://docs.aws.amazon.com/IAM/latest/UserGuide/access-analyzer-create-internal.html) to find out how to create an Internal Access Analyzer
+
+However, there are also things we need to build the relationships, such as the relation between principals and permission sets, and, the roles that provisioned into each account part of the AWS IAM Identity Center deployments. 
+
+
+In order to understand these relationships, lets conceptualize the relationships we need to build in this diagram.
+
+![Relationships](/img/relationships.png)
+
+So we finally have an idea of how our graph needs to be built. Using the power of automation, lets actually build something that can help us put all this together. 
+
+![Our Architecture](/img/architecture.png)
+
+## Let's build!
 
 #### 0. Pre-requisites
 
