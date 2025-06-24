@@ -23,7 +23,7 @@ Once this completes be sure to check the output tab for Arn information that you
 
 #### 2. Create cross-account IAM roles in your AWS organization
 
-For the Lambda `getiamroles` function to retrieve IAM roles deployed by AWS IAM Identity Center into each of your AWS Accounts, you must deploy a cloudformation stackset and stack as described [here](./idciaminventoryrole.stack-set-creation.md).
+For the Lambda `getiamroles` function to retrieve IAM roles deployed by AWS IAM Identity Center into each of your AWS Accounts, you must deploy a cloudformation stackset and stack as described [here](source/idciaminventoryrole/stack-set-creation.md).
 
 
 #### 3. Cloudformation - Neptune Analytics Setup
