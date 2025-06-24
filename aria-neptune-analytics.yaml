@@ -26,6 +26,11 @@ Resources:
   # VPC Configuration
   NeptuneVPC:
     Type: AWS::EC2::VPC
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W60
+            reason: Not required for this sample deployment but strongly recommended for production implementation
     Properties:
       CidrBlock: 172.32.0.0/16
       EnableDnsHostnames: true
@@ -69,6 +74,8 @@ Resources:
             reason: This is an example solution so not required however in a production implementation vpc flow logs should be enabled
           - id: W9
             reason: This is required for Neptune to function as per documentation
+          - id: W28
+            reason: Suppressing explicit name for security group as it is set using stack name for discoverability by end users
     Properties:
       GroupDescription: Security group for Neptune Analytics VPC endpoint
       GroupName: !Sub '${AWS::StackName}-NeptuneAnalyticsSG'
