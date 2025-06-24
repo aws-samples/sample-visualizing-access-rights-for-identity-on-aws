@@ -71,7 +71,7 @@ Resources:
             reason: This is required for Neptune to function as per documentation
     Properties:
       GroupDescription: Security group for Neptune Analytics VPC endpoint
-      GroupName: ${AWS::StackName}-NeptuneAnalyticsSG
+      GroupName: !Sub '${AWS::StackName}-NeptuneAnalyticsSG'
       VpcId: !Ref NeptuneVPC
       SecurityGroupIngress:
         - Description: Allow ingress from external IP address to Neptune Analytics
