@@ -26,7 +26,7 @@ SOURCE_DIR="./zip/"
 
 # Check if the source directory exists
 if [ ! -d "$SOURCE_DIR" ]; then
-    echo "Error: Source directory does not exist."
+    echo "Error: Source directory does not exist...creating..."
     mkdir zip
 fi
 
@@ -80,7 +80,7 @@ rm -rf "$SOURCE_DIR"*.zip
 rmdir "$SOURCE_DIR"
 
 echo "-----"
-echo "Storing generated bucket names in SSM paramater store..."
+echo "Storing generated bucket names in SSM parameter store..."
 aws ssm put-parameter --name "aria-source-bucket" --value "$SOURCE_BUCKET" --type "String" --overwrite > /dev/null
 aws ssm put-parameter --name "aria-export-bucket" --value "$EXPORT_BUCKET" --type "String" --overwrite > /dev/null
 echo "Source Bucket: $SOURCE_BUCKET"

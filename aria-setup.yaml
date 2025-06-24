@@ -4,7 +4,7 @@ Description: 'CloudFormation template to deploy Lambda functions, IAM roles and 
 Parameters:
   S3SourceBucketName:
     Type: AWS::SSM::Parameter::Value<String>
-    Description: Name of the SSM parameter containing the S3 bucket with all Lambda function code
+    Description: Name of the SSM parameter containing the S3 bucket with all Lambda function source code
     Default: 'aria-source-bucket'
 
   S3ExportBucketName:
