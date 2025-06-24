@@ -38,11 +38,9 @@ We can most information from two different sets of Identity Center APIs:
 1. [Identity Store](https://docs.aws.amazon.com/singlesignon/latest/IdentityStoreAPIReference/welcome.html) 
 2. [Identity Center](https://docs.aws.amazon.com/singlesignon/latest/APIReference/welcome.html)
 
-Lastly we also want to bring in Unused Access findings and Internal Access findings from [IAM Access Analyzer](https://docs.aws.amazon.com/IAM/latest/UserGuide/what-is-access-analyzer.html), which we will do using EventBridge. To to this, the solution needs to have Unused Access Analyzer and Internal Access Analyzers setup, look
-* [here](https://docs.aws.amazon.com/IAM/latest/UserGuide/access-analyzer-create-unused.html) to find out how to create an Unused Access Analyzer, and
-* [here](https://docs.aws.amazon.com/IAM/latest/UserGuide/access-analyzer-create-internal.html) to find out how to create an Internal Access Analyzer
+Lastly we also want to bring in Unused Access findings and Internal Access findings from [IAM Access Analyzer](https://docs.aws.amazon.com/IAM/latest/UserGuide/what-is-access-analyzer.html), which we will do using EventBridge. To achieve this, the solution needs to have [Unused Access Analyzer](https://docs.aws.amazon.com/IAM/latest/UserGuide/access-analyzer-create-unused.html) and [Internal Access Analyzer](https://docs.aws.amazon.com/IAM/latest/UserGuide/access-analyzer-create-internal.html) setup.
 
-However, there are also things we need to build the relationships, such as the relation between principals and permission sets, and, the roles that provisioned into each account part of the AWS IAM Identity Center deployments. 
+However, there are also things we need to build the relationships, such as the relation between principals and permission sets, and, are provisioned into each account part of the AWS IAM Identity Center deployments. 
 
 
 In order to understand these relationships, lets conceptualize the relationships we need to build in this diagram.
@@ -68,7 +66,7 @@ This script will use AWS CLI commands to create two S3 buckets in your specified
 
 #### 1. Cloudformation - Initial Code Setup
 
-* Deploy a Cloudformation stack in the ==same account== and ==region== as your delegated AWS IAM Identity Center using the `aria-setup.yaml` template
+* Deploy a Cloudformation stack in the *same account and region* as your delegated AWS IAM Identity Center using the `aria-setup.yaml` template
 * Give the stack a name, something like `aria-setup`
 * Leave all parameters as they are - no changes required
   
@@ -81,7 +79,7 @@ For the Lambda `getiamroles` function to retrieve IAM roles deployed by AWS IAM 
 
 #### 3. Cloudformation - Neptune Analytics Setup
 
-* Deploy a Cloudformation stack in the ==same account== and ==region== as your delegated Identity Center using the `aria-neptune-analytics.yaml` template
+* Deploy a Cloudformation stack in the *same account and region* as your delegated Identity Center using the `aria-neptune-analytics.yaml` template
   * Give the stack a name, something like `aria-neptune-analytics`
   * Make sure you update the `AriaSetupStackName` parameter with the name of the Cloudformation stack you created in step 1 above
   * Make sure you update the `S3ExportBucketName` parameter with the name of the S3 Export Bucket created in Step 0 and used in Step 1 above
@@ -90,7 +88,7 @@ For the Lambda `getiamroles` function to retrieve IAM roles deployed by AWS IAM 
 
 #### 4. Cloudformation - Neptune Notebook Setup
 
-* Deploy a Cloudformation stack in the ==same account== and ==region== as your `aria-neptune-analytics.yaml` template
+* Deploy a Cloudformation stack in the *same account and region* as your `aria-neptune-analytics.yaml` template
   * Give the stack a name, like `aria-neptune-notebook`
   * Make sure you update the following parameters:
     * GraphPort: `8182`
