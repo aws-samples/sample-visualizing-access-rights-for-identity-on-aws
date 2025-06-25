@@ -157,12 +157,12 @@ def lambda_handler(event, context):
     try:    
         if (event['detail']['findingType'] == 'InternalAccess'):
             if (event['detail']['status'] == 'RESOLVED'):
-                delete_item_by_finding_id(event['detail']['findingId'], table_ia))
+                delete_item_by_finding_id(event['detail']['findingId'], table_ia)
             else:
                 parse_internalaccess_finding(event, table_ia)
         elif (event['detail']['findingType'] == 'UnusedPermission' or 'UnusedIAMRole'):
             if (event['detail']['status'] == 'ARCHIVED'):
-                delete_item_by_finding_id(event['detail']['findingId'], table_ua))
+                delete_item_by_finding_id(event['detail']['findingId'], table_ua)
             else:
                 parse_unusedaccess_finding(event, table_ua)
 
