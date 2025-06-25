@@ -2,6 +2,7 @@ import json
 import boto3
 from datetime import datetime
 import re
+from botocore.exceptions import ClientError
 
 # Internal Access Finding
 def parse_internalaccess_finding(event,table_ia):
