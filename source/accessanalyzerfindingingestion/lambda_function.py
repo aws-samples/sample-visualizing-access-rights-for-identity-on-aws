@@ -116,31 +116,23 @@ def parse_unusedaccess_finding(event,table_ua):
     # Add the item to the DynamoDB table
     table_ua.put_item(Item=item)
 
-def delete_item_by_finding_id(table_name, finding_id):
+def delete_item_by_finding_id(finding_id, table_name):
     try:
-        # Create DynamoDB resource
-        dynamodb = boto3.resource('dynamodb')
-        
-        # Get the table
-        table = dynamodb.Table(table_name)
-        
-        # Delete the item
-        response = table.delete_item(
+        response = table_name.delete_item(
             Key={
-                'FindingId': finding_id
-            }
+                'FindingId': str(finding_id)
+            },
+            ConditionExpression='attribute_exists(FindingId)'
         )
         
-        # Check if the deletion was successful
-        if response['ResponseMetadata']['HTTPStatusCode'] == 200:
-            print(f"Successfully deleted item with FindingId: {finding_id}")
-            return True
-        else:
-            print(f"Failed to delete item with FindingId: {finding_id}")
-            return False
+        print(f"Item with FindingId {finding_id} was successfully deleted.")
+        return True
         
     except ClientError as e:
-        print(f"Error deleting item: {e}")
+        if e.response['Error']['Code'] == 'ConditionalCheckFailedException':
+            print(f"Item with FindingId {finding_id} does not exist.")
+        else:
+            print(f"An error occurred: {e.response['Error']['Message']}")
         return False
 
 
@@ -158,10 +150,11 @@ def lambda_handler(event, context):
     try:    
         if (event['detail']['findingType'] == 'InternalAccess'):
             if (event['detail']['status'] == 'RESOLVED'):
-                delete_item_by_finding_id(event['detail']['findingId'], table_ia)
+                delete_item_by_finding_id(event['detail']['id'], table_ia)
             else:
                 parse_internalaccess_finding(event, table_ia)
-        elif (event['detail']['findingType'] == 'UnusedPermission' or 'UnusedIAMRole'):
+        
+        if (event['detail']['findingType'] == 'UnusedPermission' or 'UnusedIAMRole'):
             if (event['detail']['status'] == 'ARCHIVED'):
                 delete_item_by_finding_id(event['detail']['findingId'], table_ua)
             else:
