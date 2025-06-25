@@ -1,6 +1,6 @@
 # Welcome to ARIA-gv (Access Rights for Identity on AWS - graph visualization)
 
-NOTE: This was a Code Talk session from re:Inforce 2025 - IAM341, presented by Meg Peddada and Alex Waddell.
+**NOTE:** This sample code was shown at AWS re:Inforce 2025 in Code Talk session IAM341, presented by Meg Peddada and Alex Waddell. Watch the session recording here: [https://www.youtube.com/watch?v=JsPug0rh7BM](https://www.youtube.com/watch?v=JsPug0rh7BM).
 
 ## What are the challenges we are trying to solve?
 Customers connect their Identity Provider (IdP) to AWS IAM Identity Center to enable easier management of access to AWS applications and accounts. This single connection then allows users & groups from the IdP to be easily synchronised to Identity Center and used to provide access to (for example) AWS Accounts.
