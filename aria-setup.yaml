@@ -1339,8 +1339,9 @@ Resources:
                 Action:
                   - 'dynamodb:PutItem'
                 Resource: 
-                  - !Sub 'arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/AriaIdCAccessAnalyzerFindings'
-                  - !Sub 'arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/AriaIdCUnusedAccessAnalyzerFindings'
+                  - !Sub 'arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/AriaIdCInternalAAFindings'
+                  - !Sub 'arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/AriaIdCUnusedAAFindings'
+                  - !Sub 'arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/AriaIdCExternalAAFindings'
       Tags:
           - Key: aria
             Value: role
@@ -1668,8 +1669,10 @@ Resources:
             Condition:
               StringEquals:
                 aws:SourceArn:
-                  Fn::Sub: >-
-                      arn:${AWS::Partition}:events:${AWS::Region}:${AWS::AccountId}:rule/${AWS::StackName}-Access-Analyzer-Trigger-Ingestion
+                  - !Sub 'arn:${AWS::Partition}:events:${AWS::Region}:${AWS::AccountId}:rule/${AWS::StackName}-Internal-AA-Trigger-Ingestion'
+                  - !Sub 'arn:${AWS::Partition}:events:${AWS::Region}:${AWS::AccountId}:rule/${AWS::StackName}-Unused-AA-Trigger-Ingestion'
+                  - !Sub 'arn:${AWS::Partition}:events:${AWS::Region}:${AWS::AccountId}:rule/${AWS::StackName}-External-AA-Trigger-Ingestion'
+                  
       Policies:
         - PolicyName: AccessAnalyzerFindingIngestionEventBridgeInvokePolicy
           PolicyDocument:
@@ -1684,10 +1687,10 @@ Resources:
           - Key: aria
             Value: role
 
-  AriaAAInternalFindingEventBridgeRule:
+  AriaInternalAAFindingEventBridgeRule:
     Type: AWS::Events::Rule 
     Properties:
-      Name: !Sub '${AWS::StackName}-Internal-Access-Analyzer-Trigger-Ingestion'
+      Name: !Sub '${AWS::StackName}-Internal-AA-Trigger-Ingestion'
       EventPattern: >-
         {"source":["aws.access-analyzer"],"detail-type":["Internal Access
         Finding"],"detail":{"principal":{"AWS":[{"wildcard":"arn:aws:iam::*:role/aws-reserved/sso.amazonaws.com/AWSReservedSSO_*"}]}}}
@@ -1698,12 +1701,25 @@ Resources:
           Arn: !GetAtt AccessAnalyzerFindingIngestionLambdaFunction.Arn
           RoleArn: !GetAtt AriaAccessAnalyzerFindingIngestionEventBridgeInvokeRole.Arn
   
-  AriaAAUnusedFindingEventBridgeRule:
+  AriaUnusedAAFindingEventBridgeRule:
     Type: AWS::Events::Rule
     Properties:
-      Name: !Sub '${AWS::StackName}-Unused-Access-Analyzer-Trigger-Ingestion'
+      Name: !Sub '${AWS::StackName}-Unused-AA-Trigger-Ingestion'
       EventPattern: >-
         {"source":["aws.access-analyzer"],"detail-type":["Unused Access Finding for IAM entities"],"detail.resource":[{"wildcard":"arn:aws:iam::*:role/aws-reserved/sso.amazonaws.com/AWSReservedSSO_*"}]}
+      State: ENABLED
+      EventBusName: default
+      Targets:
+        - Id: Idd97798e1-e511-4494-8c47-3f25568cd5bc
+          Arn: !GetAtt AccessAnalyzerFindingIngestionLambdaFunction.Arn
+          RoleArn: !GetAtt AriaAccessAnalyzerFindingIngestionEventBridgeInvokeRole.Arn
+
+  AriaExternalAAFindingEventBridgeRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: !Sub '${AWS::StackName}-External-AA-Trigger-Ingestion'
+      EventPattern: >-
+        {"source":["aws.access-analyzer"],"detail-type":["Access Analyzer Finding"]}
       State: ENABLED
       EventBusName: default
       Targets:

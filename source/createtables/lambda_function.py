@@ -87,7 +87,7 @@ def create_tables(dynamodb):
                 {'AttributeName': 'IamRoleArn', 'AttributeType': 'S'}
             ]
         },
-        'AriaIdCAccessAnalyzerFindings': {
+        'AriaIdCInternalAAFindings': {
             'KeySchema': [
                 {'AttributeName': 'FindingId', 'KeyType': 'HASH'}
             ],
@@ -95,7 +95,15 @@ def create_tables(dynamodb):
                 {'AttributeName': 'FindingId', 'AttributeType': 'S'}
             ]
         },
-        'AriaIdCUnusedAccessAnalyzerFindings': {
+        'AriaIdCUnusedAAFindings': {
+            'KeySchema': [
+                {'AttributeName': 'FindingId', 'KeyType': 'HASH'}
+            ],
+            'AttributeDefinitions': [
+                {'AttributeName': 'FindingId', 'AttributeType': 'S'}
+            ]
+        },
+        'AriaIdCExternalAAFindings': {
             'KeySchema': [
                 {'AttributeName': 'FindingId', 'KeyType': 'HASH'}
             ],

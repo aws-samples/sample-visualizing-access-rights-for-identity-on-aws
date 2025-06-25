@@ -2,6 +2,8 @@
 
 Run this in the Management account to deploy a CloudFormation stackset that will create the IAM role needed to allow inventory of IAM roles in all accounts
 
+*Caveat: Skip step 1 if your AWS IAM Identity Center is running in your management account and you have NOT delegated the administration to a member account*
+
 #### 1. Create stackset
 
 **NOTE:**

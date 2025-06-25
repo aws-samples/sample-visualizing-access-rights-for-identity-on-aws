@@ -3,10 +3,10 @@ import boto3
 from datetime import datetime
 import re
 
-def parse_unusedaccess_finding(event,table_ia):
+# Internal Access Finding
+def parse_internalaccess_finding(event,table_ia):
     # Parse the event detail
     detail = (event['detail'])
-    # print(f"Received event: {json.dumps(event)}")
 
     delimiter = ", " # Define a delimiter
     
@@ -34,7 +34,6 @@ def parse_unusedaccess_finding(event,table_ia):
     action_array = detail.get('action', '')
     action = delimiter.join(action_array)
     
-    # print(f"Actions: {action}")
     created_at = detail['createdAt']
     updated_at = detail['updatedAt']
     
@@ -62,11 +61,10 @@ def parse_unusedaccess_finding(event,table_ia):
     # Add the item to the DynamoDB table
     table_ia.put_item(Item=item)
 
- #Unused Permissions   
-def parse_unusedpermissions_finding(event,table_ua):
+# Unused Access Finding
+def parse_unusedaccess_finding(event,table_ua):
     # Parse the event detail
     detail = (event['detail'])
-    # print(f"Received event: {json.dumps(event)}")
 
     delimiter = ", " # Define a delimiter
     
@@ -78,18 +76,17 @@ def parse_unusedpermissions_finding(event,table_ua):
 
     # print(f"Parsing unused finding {finding_id} and extracting relevant attributes...")
 
-    #resource = event['id']
     principal = detail['resource']
     principal_name = extract_role_name(principal)
     principal_type = detail.get('resourceType', 'N/A')
     principal_owner_account = detail.get('accountId', 'N/A')
+
     resource_arn = detail.get('resource', 'N/A')
     resource_account = detail.get('accountId', 'N/A')
     resource_type = detail.get('resourceType', 'N/A')
     
     status = detail['status']
         
-    # print(f"Actions: {action}")
     created_at = detail['createdAt']
     updated_at = detail['updatedAt']
     analyzed_at = detail['analyzedAt']
@@ -125,14 +122,14 @@ def extract_role_name(arn):
     
 def lambda_handler(event, context):
     dynamodb = boto3.resource('dynamodb')
-    table_ia = dynamodb.Table('AriaIdCAccessAnalyzerFindings')
-    table_ua = dynamodb.Table('AriaIdCUnusedAccessAnalyzerFindings')
+    table_ia = dynamodb.Table('AriaIdCInternalAAFindings')
+    table_ua = dynamodb.Table('AriaIdCUnusedAAFindings')
     
     try:    
         if (event['detail']['findingType'] == 'InternalAccess'):
-            parse_unusedaccess_finding(event, table_ia)
+            parse_internalaccess_finding(event, table_ia)
         elif (event['detail']['findingType'] == 'UnusedPermission' or 'UnusedIAMRole'):
-            parse_unusedpermissions_finding(event, table_ua)
+            parse_unusedaccess_finding(event, table_ua)
 
         # print(f"Successfully added finding {finding_id} to DynamoDB")
         return {
