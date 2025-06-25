@@ -32,9 +32,11 @@ Some challenges when attempting to answer those questions are:
 
 ## So what can we do?
 
-We need to get data from AWS Identity and Access Management, AWS IAM Identity Center and also AWS IAM Access Analyzer. Fortunately there are APIs that we can use to get most of it. Then, we can process and enrich that data and put it into the right format for visualizing it.
+What if we were able to get various data sets and understand the relationships between those? Then perhaps we could visualize that and even produce csv exports! 
 
-We can most information from two different sets of Identity Center APIs:
+Well, to do that we realised that we need data from AWS Identity and Access Management, AWS IAM Identity Center and also AWS IAM Access Analyzer. Fortunately there are APIs that we can use to get the majority of this data, then we can process and enrich that data and finally put it into the right format to create csv exports and to visualize it.
+
+We can get most information from two different sets of Identity Center APIs:
 1. [Identity Store](https://docs.aws.amazon.com/singlesignon/latest/IdentityStoreAPIReference/welcome.html) 
 2. [Identity Center](https://docs.aws.amazon.com/singlesignon/latest/APIReference/welcome.html)
 
@@ -114,5 +116,9 @@ Navigate to AWS Step Functions and execute the state machines in the following o
   * You should have a notebook named `aws-neptune-analytics-Aria-Neptune-Notebook` or something similar
   * Click on `radio button > Actions > Open Graph Explorer`
   * Make sure you add all the nodes and edges and experiment away! 
+
+Here is an example of a graph visualization that you can create that looks very similar to the relationships diagram shown above.
+
+![Example Graph](/img/graph-example.png)
 
 Got an idea for how this could be extended and improved? Let us know!
