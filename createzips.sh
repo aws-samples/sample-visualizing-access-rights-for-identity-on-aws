@@ -1,4 +1,4 @@
-@echo off
+#!/bin/bash
 echo Creating directories...
 mkdir ./source/createtables
 mkdir ./source/listusers
@@ -12,6 +12,7 @@ mkdir ./source/listgroupaccountassignments
 mkdir ./source/getiamroles
 mkdir ./source/accessanalyzerfindingingestion
 mkdir ./source/s3export
+mkdir ./source/updatefunctioncode
 
 rm ./zip/*.zip
 
@@ -40,5 +41,7 @@ zip -j ./zip/getiamroles.zip ./source/getiamroles/lambda_function.py
 zip -j ./zip/accessanalyzerfindingingestion.zip ./source/accessanalyzerfindingingestion/lambda_function.py
 
 zip -j ./zip/s3export.zip ./source/s3export/lambda_function.py
+
+zip -j ./zip/updatefunctioncode.zip ./source/updatefunctioncode/lambda_function.py
 
 echo All done!

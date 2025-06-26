@@ -26,7 +26,7 @@ SOURCE_DIR="./zip/"
 
 # Check if the source directory exists
 if [ ! -d "$SOURCE_DIR" ]; then
-    echo "Error: Source directory does not exist...creating..."
+    echo "Creating temporary local source directory..."
     mkdir zip
 fi
 
@@ -41,16 +41,22 @@ fi
 
 echo "Aria Source Bucket is : $SOURCE_BUCKET"
 
-# Check if aria SOURCE_BUCKET exists
+# Check if aria SOURCE_BUCKET exists - create if missing, add configure bucket for EventBridge notifications
 response=$(aws s3api head-bucket --bucket "$SOURCE_BUCKET")
 if [ $? -eq 0 ]; then
     echo "Source Bucket already exists"
+    aws s3api put-bucket-notification-configuration \
+        --bucket "$SOURCE_BUCKET" \
+        --notification-configuration '{"EventBridgeConfiguration": {}}'
 else
     echo "Source Bucket does not exist...creating..."
     aws s3api create-bucket \
         --bucket "$SOURCE_BUCKET" \
         --region "$REGION" \
         $(if [ "$REGION" != "us-east-1" ]; then echo "--create-bucket-configuration LocationConstraint=$REGION"; fi)
+    aws s3api put-bucket-notification-configuration \
+        --bucket "$SOURCE_BUCKET" \
+        --notification-configuration '{"EventBridgeConfiguration": {}}'
 fi
 
 echo "Aria Export Bucket is : $EXPORT_BUCKET"
@@ -72,7 +78,7 @@ sh ./createzips.sh
 # Copy files to SOURCE_BUCKET
 echo "Uploading zip files to S3 bucket: $SOURCE_BUCKET"
 aws s3 rm s3://$SOURCE_BUCKET/ --recursive
-aws s3 sync "$SOURCE_DIR" "s3://$SOURCE_BUCKET" --exclude "*" --include "*.zip"
+aws s3 cp "$SOURCE_DIR" s3://$SOURCE_BUCKET/ --recursive --exclude "*" --include "*.zip"
 
 # Delete files from zip bucket
 echo "Cleaning up..."

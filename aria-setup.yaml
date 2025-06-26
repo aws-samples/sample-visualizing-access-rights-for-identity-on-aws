@@ -72,6 +72,11 @@ Parameters:
     Description: S3 key (path) to the AccessAnalyzerFindingIngestion Lambda function code zip file
     Default: 'accessanalyzerfindingingestion.zip'
 
+  UpdateFunctionCodeS3Key:
+    Type: String
+    Description: S3 key (path) to the UpdateFunctionCode Lambda function code zip file
+    Default: 'updatefunctioncode.zip'
+
   PythonHandler:
     Type: String
     Description: The Python handler function
@@ -102,6 +107,7 @@ Metadata:
           - GetIAMRolesS3Key
           - S3ExportS3Key
           - AccessAnalyzerFindingIngestionS3Key
+          - UpdateFunctionCodeS3Key
       - 
         Label: 
           default: "Python Handler"
@@ -216,6 +222,19 @@ Resources:
       Tags:
           - Key: aria
             Value: log
+  
+  # Add Lambda Arn as SSM Parameter
+  CreateTablesLambdaArnSSMParameter:
+    DependsOn:
+      - CreateTablesLambdaFunction
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Join ['', ['/aria/lambda/', !Select [0, !Split ['.', !Ref CreateTablesS3Key]]]]
+      Type: String
+      Value: !GetAtt CreateTablesLambdaFunction.Arn
+      Description: !Sub 'ARN for Lambda function ${CreateTablesS3Key}'
+      Tags:
+          aria: ssm
 
   # IAM Role for ListUsers Lambda
   ListUsersLambdaExecutionRole:
@@ -321,6 +340,19 @@ Resources:
           - Key: aria
             Value: log
 
+  # Add Lambda Arn as SSM Parameter
+  ListUsersLambdaArnSSMParameter:
+    DependsOn:
+      - ListUsersLambdaFunction
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Join ['', ['/aria/lambda/', !Select [0, !Split ['.', !Ref ListUsersS3Key]]]]
+      Type: String
+      Value: !GetAtt ListUsersLambdaFunction.Arn
+      Description: !Sub 'ARN for Lambda function ${ListUsersS3Key}'
+      Tags:
+          aria: ssm
+
   # IAM Role for ListGroups Lambda
   ListGroupsLambdaExecutionRole:
     Type: 'AWS::IAM::Role'
@@ -425,6 +457,19 @@ Resources:
           - Key: aria
             Value: log
 
+  # Add Lambda Arn as SSM Parameter
+  ListGroupsLambdaArnSSMParameter:
+    DependsOn:
+      - ListGroupsLambdaFunction
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Join ['', ['/aria/lambda/', !Select [0, !Split ['.', !Ref ListGroupsS3Key]]]]
+      Type: String
+      Value: !GetAtt ListGroupsLambdaFunction.Arn
+      Description: !Sub 'ARN for Lambda function ${ListGroupsS3Key}'
+      Tags:
+          aria: ssm
+
   # IAM Role for ListGroupMembership Lambda
   ListGroupMembershipLambdaExecutionRole:
     Type: 'AWS::IAM::Role'
@@ -516,6 +561,19 @@ Resources:
           - Key: aria
             Value: function
 
+  # Add Lambda Arn as SSM Parameter
+  ListGroupMembershipLambdaArnSSMParameter:
+    DependsOn:
+      - ListGroupMembershipLambdaFunction
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Join ['', ['/aria/lambda/', !Select [0, !Split ['.', !Ref ListGroupMembershipS3Key]]]]
+      Type: String
+      Value: !GetAtt ListGroupMembershipLambdaFunction.Arn
+      Description: !Sub 'ARN for Lambda function ${ListGroupMembershipS3Key}'
+      Tags:
+          aria: ssm
+
   # CloudWatch Log Group for ListGroupMembership Lambda
   ListGroupMembershipLambdaLogGroup:
     Type: 'AWS::Logs::LogGroup'
@@ -532,6 +590,7 @@ Resources:
           - Key: aria
             Value: log
 
+  
   # IAM Role for ListPermissionSets Lambda
   ListPermissionSetsLambdaExecutionRole:
     Type: 'AWS::IAM::Role'
@@ -634,6 +693,19 @@ Resources:
       Tags:
           - Key: aria
             Value: log
+
+  # Add Lambda Arn as SSM Parameter
+  ListPermissionSetsLambdaArnSSMParameter:
+    DependsOn:
+      - ListPermissionSetsLambdaFunction
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Join ['', ['/aria/lambda/', !Select [0, !Split ['.', !Ref ListPermissionSetsS3Key]]]]
+      Type: String
+      Value: !GetAtt ListPermissionSetsLambdaFunction.Arn
+      Description: !Sub 'ARN for Lambda function ${ListPermissionSetsS3Key}'
+      Tags:
+          aria: ssm
 
   # IAM Role for ListProvisionedPermissionSets Lambda
   ListProvisionedPermissionSetsLambdaExecutionRole:
@@ -748,7 +820,20 @@ Resources:
           - Key: aria
             Value: log
 
-# IAM Role for ListAccounts Lambda
+  # Add Lambda Arn as SSM Parameter
+  ListProvisionedPermissionSetsLambdaArnSSMParameter:
+    DependsOn:
+      - ListProvisionedPermissionSetsLambdaFunction
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Join ['', ['/aria/lambda/', !Select [0, !Split ['.', !Ref ListProvisionedPermissionSetsS3Key]]]]
+      Type: String
+      Value: !GetAtt ListProvisionedPermissionSetsLambdaFunction.Arn
+      Description: !Sub 'ARN for Lambda function ${ListProvisionedPermissionSetsS3Key}'
+      Tags:
+          aria: ssm
+
+  # IAM Role for ListAccounts Lambda
   ListAccountsLambdaExecutionRole:
     Type: 'AWS::IAM::Role'
     Metadata:
@@ -848,6 +933,19 @@ Resources:
       Tags:
           - Key: aria
             Value: log
+
+  # Add Lambda Arn as SSM Parameter
+  ListAccountsLambdaArnSSMParameter:
+    DependsOn:
+      - ListAccountsLambdaFunction
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Join ['', ['/aria/lambda/', !Select [0, !Split ['.', !Ref ListAccountsS3Key]]]]
+      Type: String
+      Value: !GetAtt ListAccountsLambdaFunction.Arn
+      Description: !Sub 'ARN for Lambda function ${ListAccountsS3Key}'
+      Tags:
+          aria: ssm
 
   # IAM Role for ListUserAccountAssignments Lambda
   ListUserAccountAssignmentsLambdaExecutionRole:
@@ -965,7 +1063,20 @@ Resources:
           - Key: aria
             Value: log
   
-# IAM Role for ListGroupAccountAssignments Lambda
+  # Add Lambda Arn as SSM Parameter
+  ListUserAccountAssignmentsLambdaArnSSMParameter:
+    DependsOn:
+      - ListUserAccountAssignmentsLambdaFunction
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Join ['', ['/aria/lambda/', !Select [0, !Split ['.', !Ref ListUserAccountAssignmentsS3Key]]]]
+      Type: String
+      Value: !GetAtt ListUserAccountAssignmentsLambdaFunction.Arn
+      Description: !Sub 'ARN for Lambda function ${ListUserAccountAssignmentsS3Key}'
+      Tags:
+          aria: ssm
+
+  # IAM Role for ListGroupAccountAssignments Lambda
   ListGroupAccountAssignmentsLambdaExecutionRole:
     Type: 'AWS::IAM::Role'
     Metadata:
@@ -1085,6 +1196,19 @@ Resources:
           - Key: aria
             Value: log
 
+  # Add Lambda Arn as SSM Parameter
+  ListGroupAccountAssignmentsLambdaArnSSMParameter:
+    DependsOn:
+      - ListGroupAccountAssignmentsLambdaFunction
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Join ['', ['/aria/lambda/', !Select [0, !Split ['.', !Ref ListGroupAccountAssignmentsS3Key]]]]
+      Type: String
+      Value: !GetAtt ListGroupAccountAssignmentsLambdaFunction.Arn
+      Description: !Sub 'ARN for Lambda function ${ListGroupAccountAssignmentsS3Key}'
+      Tags:
+          aria: ssm
+
   # IAM Role for GetIAMRoles Lambda
   GetIAMRolesLambdaExecutionRole:
     Type: 'AWS::IAM::Role'
@@ -1199,6 +1323,19 @@ Resources:
           - Key: aria
             Value: log
 
+  # Add Lambda Arn as SSM Parameter
+  GetIAMRolesLambdaArnSSMParameter:
+    DependsOn:
+      - GetIAMRolesLambdaFunction
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Join ['', ['/aria/lambda/', !Select [0, !Split ['.', !Ref GetIAMRolesS3Key]]]]
+      Type: String
+      Value: !GetAtt GetIAMRolesLambdaFunction.Arn
+      Description: !Sub 'ARN for Lambda function ${GetIAMRolesS3Key}'
+      Tags:
+          aria: ssm
+
   # IAM Role for S3Export Lambda
   S3ExportLambdaExecutionRole:
     Type: 'AWS::IAM::Role'
@@ -1301,7 +1438,20 @@ Resources:
           - Key: aria
             Value: log
 
-  # IAM Role for S3Export Lambda
+  # Add Lambda Arn as SSM Parameter
+  S3ExportLambdaArnSSMParameter:
+    DependsOn:
+      - S3ExportLambdaFunction
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Join ['', ['/aria/lambda/', !Select [0, !Split ['.', !Ref S3ExportS3Key]]]]
+      Type: String
+      Value: !GetAtt S3ExportLambdaFunction.Arn
+      Description: !Sub 'ARN for Lambda function ${S3ExportS3Key}'
+      Tags:
+          aria: ssm
+
+  # IAM Role for Access Analyzer Ingestion Lambda
   AccessAnalyzerFindingIngestionLambdaExecutionRole:
     Type: 'AWS::IAM::Role'
     Metadata:
@@ -1400,6 +1550,177 @@ Resources:
       Tags:
           - Key: aria
             Value: log
+
+  # Add Lambda Arn as SSM Parameter
+  AAFindingIngestionLambdaArnSSMParameter:
+    DependsOn:
+      - AccessAnalyzerFindingIngestionLambdaFunction
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Join ['', ['/aria/lambda/', !Select [0, !Split ['.', !Ref AccessAnalyzerFindingIngestionS3Key]]]]
+      Type: String
+      Value: !GetAtt AccessAnalyzerFindingIngestionLambdaFunction.Arn
+      Description: !Sub 'ARN for Lambda function ${AccessAnalyzerFindingIngestionS3Key}'
+      Tags:
+          aria: ssm
+
+  # IAM Role for UpdateFunctionCode Lambda Execution
+  UpdateFunctionCodeLambdaExecutionRole:
+    Type: 'AWS::IAM::Role'
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W11
+            reason: Using managed policy for Lambda VPC Access that may contain a wildcard which is outside of our control
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+            Action:
+              - 'sts:AssumeRole'
+      Policies:
+        - PolicyName: UpdateFunctionCodeLambdaExecutionPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - 's3:GetObject'
+                Resource: !Sub 'arn:aws:s3:::${S3SourceBucketName}/*'
+              - Effect: Allow
+                Action:
+                  - 'logs:CreateLogGroup'
+                  - 'logs:CreateLogStream'
+                  - 'logs:PutLogEvents'
+                Resource: 
+                  - !Sub 'arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/${AWS::StackName}-UpdateFunctionCode-function:*'
+              - Effect: Allow
+                Action:
+                  - 'ssm:GetParameter*'
+                Resource: !Sub 'arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/aria/lambda/*'
+              - Effect: Allow
+                Action: 
+                  - 'lambda:UpdateFunctionCode'
+                Resource:
+                  - !Sub 'arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:${AWS::StackName}-*'
+      Tags:
+          - Key: aria
+            Value: role
+
+  # UpdateFunctionCode Lambda Function
+  UpdateFunctionCodeLambdaFunction:
+    Type: 'AWS::Lambda::Function'
+    #checkov:skip=CKV_AWS_116:No need for Dead Letter Queue (DLQ)
+    #checkov:skip=CKV_AWS_173:No need to encrypt env variables as nothing sensitive
+    #checkov:skip=CKV_AWS_117:Lambda does not need to be in a VPC
+    #checkov:skip=CKV_AWS_115:Lambda does not need ReservedConcurrentExecutions
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: Lambda does not need to be in a VPC
+          - id: W92
+            reason: Lambda does not need ReservedConcurrentExecutions
+    Properties:
+      FunctionName: !Sub '${AWS::StackName}-UpdateFunctionCode-function'
+      Handler: !Ref PythonHandler
+      Role: !GetAtt UpdateFunctionCodeLambdaExecutionRole.Arn
+      PackageType: Zip
+      Code:
+        S3Bucket: !Ref S3SourceBucketName
+        S3Key: !Ref UpdateFunctionCodeS3Key
+      Runtime: python3.13
+      Timeout: 300
+      MemorySize: 256
+      Environment:
+        Variables:
+          STACK_NAME: !Ref 'AWS::StackName'
+          PYTHON_PATH: '/var/task'
+      TracingConfig:
+        Mode: Active
+      Architectures:
+        - arm64
+      Tags:
+          - Key: aria
+            Value: function
+
+  # CloudWatch Log Group for UpdateFunctionCode Lambda
+  UpdateFunctionCodeLambdaLogGroup:
+    Type: 'AWS::Logs::LogGroup'
+    #checkov:skip=CKV_AWS_158:No sensitive data is written out by the Lambda function to the CloudWatch log group
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W84
+            reason: No sensitive data is written out by the Lambda function to the CloudWatch log group
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/${AWS::StackName}-UpdateFunctionCode-function'
+      RetentionInDays: 30
+      Tags:
+          - Key: aria
+            Value: log
+
+  # Add Lambda Arn as SSM Parameter
+  UpdateFunctionCodeLambdaArnSSMParameter:
+    DependsOn:
+      - UpdateFunctionCodeLambdaFunction
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Join ['', ['/aria/lambda/', !Select [0, !Split ['.', !Ref UpdateFunctionCodeS3Key]]]]
+      Type: String
+      Value: !GetAtt UpdateFunctionCodeLambdaFunction.Arn
+      Description: !Sub 'ARN for Lambda function ${UpdateFunctionCodeS3Key}'
+      Tags:
+          aria: ssm
+
+  # IAM Role for EventBridgeRule to invoke Lambda function
+  InvokeUpdateFunctionCodeEventBridgeInvokeRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - events.amazonaws.com
+            Action:
+              - 'sts:AssumeRole'
+            Condition:
+              StringEquals:
+                aws:SourceArn:
+                  - !Sub 'arn:${AWS::Partition}:events:${AWS::Region}:${AWS::AccountId}:rule/${AWS::StackName}-Source-Trigger-UpdateFunctionCode'
+      Policies:
+        - PolicyName: InvokeUpdateFunctionCodeEventBridgeInvokePolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - lambda:InvokeFunction
+                Resource:
+                  - !GetAtt UpdateFunctionCodeLambdaFunction.Arn
+      Tags:
+          - Key: aria
+            Value: role
+
+  # EventBridge rule to invoke UpdateFunctionCode lambda when objects are uploaded to source bucket
+  InvokeUpdateFunctionCodeEventBridgeRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: !Sub '${AWS::StackName}-Source-Trigger-UpdateFunctionCode'
+      EventPattern: 
+        !Sub '{"source":["aws.s3"],"detail-type":["Object Created"],"detail":{"bucket":{"name":["${S3SourceBucketName}"]}}}'
+      State: ENABLED
+      EventBusName: default
+      Targets:
+        - Id: Id3b1ca365-df10-4d67-a299-1b553942d434
+          Arn: !GetAtt UpdateFunctionCodeLambdaFunction.Arn
+          RoleArn: !GetAtt InvokeUpdateFunctionCodeEventBridgeInvokeRole.Arn 
 
   #Create State Machine
   AriaStateMachine:
