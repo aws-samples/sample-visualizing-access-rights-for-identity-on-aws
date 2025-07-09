@@ -72,7 +72,7 @@ This intelligent approach helps your Neptune graph to reflect the most current d
 
 ## Let's build!
 
-**IMPORTANT:** If you are deploying this solution and have ALREADY deployed prior to July 6th 2025, you must manually delete the old cloudformation stacks in this order:
+**IMPORTANT:** If you are deploying this solution and have ALREADY deployed prior to July 9th 2025, you must manually delete the old cloudformation stacks in this order:
 * aria-neptune-notebook
 * aria-neptune-analytics
 * aria-setup
