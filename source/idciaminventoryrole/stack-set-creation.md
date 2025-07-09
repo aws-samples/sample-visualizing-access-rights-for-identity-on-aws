@@ -38,5 +38,5 @@ aws cloudformation create-stack-instances \
 In the management account you must manually deploy the cloudformation stack using file `idc-iam-inventory-role.yaml`
 
 **Note:**
-* Replace `arn:aws:iam::<01234567890>:role/<stack-name>-GetIAMRolesLambdaExecutionRole-<randomchars>` in the CloudFormation parameter screen with the IAM Role Arn for the GetIamRoles Lambda function - see the CloudFormation output of the Aria-Setup stack for the required Arn
+* Replace `arn:aws:iam::<01234567890>:role/<stack-name>-GetIAMRolesLambdaExecutionRole-<randomchars>` in the CloudFormation parameter screen with the IAM Role Arn for the GetIamRoles Lambda function - see the CloudFormation output for `GetIAMRolesLambdaFunctionExecutionRoleArn` for the required Arn
 

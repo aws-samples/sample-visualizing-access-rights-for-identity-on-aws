@@ -1,0 +1,1552 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: "All Lambda functions for Workforce Identity Visualization"
+
+Parameters:
+  S3SourceBucketName:
+    Type: String
+  S3ExportBucketName:
+    Type: String
+  CreateTablesS3Key:
+    Type: String
+  ListUsersS3Key:
+    Type: String
+  ListGroupsS3Key:
+    Type: String
+  ListGroupMembershipS3Key:
+    Type: String
+  ListPermissionSetsS3Key:
+    Type: String
+  ListProvisionedPermissionSetsS3Key:
+    Type: String
+  ListAccountsS3Key:
+    Type: String
+  ListUserAccountAssignmentsS3Key:
+    Type: String
+  ListGroupAccountAssignmentsS3Key:
+    Type: String
+  GetIAMRolesS3Key:
+    Type: String
+  S3ExportS3Key:
+    Type: String
+  AccessAnalyzerFindingIngestionS3Key:
+    Type: String
+  UpdateFunctionCodeS3Key:
+    Type: String
+  PythonHandler:
+    Type: String
+  StackName:
+    Type: String
+
+Resources:
+  # CreateTables Lambda
+  CreateTablesRole:
+    Type: AWS::IAM::Role
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: "sts:AssumeRole"
+      Policies:
+        - PolicyName: CreateTablesPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - "s3:GetObject"
+                Resource: !Sub "arn:aws:s3:::${S3SourceBucketName}/${CreateTablesS3Key}"
+              - Effect: Allow
+                Action:
+                  - "logs:CreateLogGroup"
+                  - "logs:CreateLogStream"
+                  - "logs:PutLogEvents"
+                Resource: !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/${StackName}-CreateTables-function:*"
+              - Effect: Allow
+                Action:
+                  - "dynamodb:CreateTable"
+                  - "dynamodb:DeleteTable"
+                  - "dynamodb:UpdateTable"
+                  - "dynamodb:DescribeTable"
+                  - "dynamodb:ListTables"
+                  - "dynamodb:DescribeLimits"
+                  - "dynamodb:UpdateTimeToLive"
+                  - "dynamodb:DescribeTimeToLive"
+                  - "dynamodb:TagResource"
+                Resource: !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/AriaIdC*"
+      Tags:
+        - Key: aria
+          Value: role
+
+  CreateTablesFunction:
+    Type: "AWS::Lambda::Function"
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: "VPC not required for this Lambda function accessing AWS services"
+      checkov:
+        skip:
+          - id: CKV_AWS_116
+            comment: "DLQ not required for this Lambda function as it's invoked by Step Functions with built-in error handling"
+          - id: CKV_AWS_173
+            comment: "Default Lambda environment variable encryption is sufficient for this function"
+          - id: CKV_AWS_117
+            comment: "VPC not required for this Lambda function accessing AWS services"
+    Properties:
+      FunctionName: !Sub "${StackName}-CreateTables-function"
+      Handler: !Ref PythonHandler
+      Role: !GetAtt CreateTablesRole.Arn
+      Code:
+        S3Bucket: !Ref S3SourceBucketName
+        S3Key: !Ref CreateTablesS3Key
+      Runtime: python3.13
+      Timeout: 300
+      MemorySize: 256
+      Environment:
+        Variables:
+          STACK_NAME: !Ref StackName
+          PYTHON_PATH: "/var/task"
+      TracingConfig:
+        Mode: Active
+      Architectures:
+        - arm64
+      ReservedConcurrentExecutions: 3
+      Tags:
+        - Key: aria
+          Value: lambda
+
+  CreateTablesLogGroup:
+    Type: "AWS::Logs::LogGroup"
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W84
+            reason: "Default CloudWatch Logs encryption is sufficient for this log group"
+      checkov:
+        skip:
+          - id: CKV_AWS_158
+            comment: "Default CloudWatch Logs encryption is sufficient for this log group"
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/${StackName}-CreateTables-function"
+      RetentionInDays: 30
+      Tags:
+        - Key: aria
+          Value: log
+
+  # ListUsers Lambda
+  ListUsersRole:
+    Type: AWS::IAM::Role
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W11
+            reason: "SSO and Identity Store services require * resource for ListUsers and ListInstances operations"
+      checkov:
+        skip:
+          - id: CKV_AWS_107
+            comment: "IAM policy requires broad permissions for SSO and Identity Store operations, no credentials exposure risk"
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: "sts:AssumeRole"
+      Policies:
+        - PolicyName: ListUsersPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - "s3:GetObject"
+                Resource: !Sub "arn:aws:s3:::${S3SourceBucketName}/${ListUsersS3Key}"
+              - Effect: Allow
+                Action:
+                  - "logs:CreateLogGroup"
+                  - "logs:CreateLogStream"
+                  - "logs:PutLogEvents"
+                Resource: !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/${StackName}-ListUsers-function:*"
+              - Effect: Allow
+                Action:
+                  - "dynamodb:PutItem"
+                Resource: !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/AriaIdCUsers"
+              - Effect: Allow
+                Action:
+                  - "identitystore:ListUsers"
+                  - "sso:ListInstances"
+                Resource: "*"
+      Tags:
+        - Key: aria
+          Value: role
+
+  ListUsersFunction:
+    Type: "AWS::Lambda::Function"
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: "VPC not required for this Lambda function accessing AWS services"
+      checkov:
+        skip:
+          - id: CKV_AWS_116
+            comment: "DLQ not required for this Lambda function as it's invoked by Step Functions with built-in error handling"
+          - id: CKV_AWS_173
+            comment: "Default Lambda environment variable encryption is sufficient for this function"
+          - id: CKV_AWS_117
+            comment: "VPC not required for this Lambda function accessing AWS services"
+    Properties:
+      FunctionName: !Sub "${StackName}-ListUsers-function"
+      Handler: !Ref PythonHandler
+      Role: !GetAtt ListUsersRole.Arn
+      Code:
+        S3Bucket: !Ref S3SourceBucketName
+        S3Key: !Ref ListUsersS3Key
+      Runtime: python3.13
+      Timeout: 300
+      MemorySize: 256
+      Environment:
+        Variables:
+          STACK_NAME: !Ref StackName
+          PYTHON_PATH: "/var/task"
+      TracingConfig:
+        Mode: Active
+      Architectures:
+        - arm64
+      ReservedConcurrentExecutions: 3
+      Tags:
+        - Key: aria
+          Value: function
+
+  ListUsersLogGroup:
+    Type: "AWS::Logs::LogGroup"
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W84
+            reason: "Default CloudWatch Logs encryption is sufficient for this log group"
+      checkov:
+        skip:
+          - id: CKV_AWS_158
+            comment: "Default CloudWatch Logs encryption is sufficient for this log group"
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/${StackName}-ListUsers-function"
+      RetentionInDays: 30
+      Tags:
+        - Key: aria
+          Value: log
+
+  # ListGroups Lambda
+  ListGroupsRole:
+    Type: AWS::IAM::Role
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W11
+            reason: "SSO and Identity Store services require * resource for ListGroups and ListInstances operations"
+      checkov:
+        skip:
+          - id: CKV_AWS_107
+            comment: "IAM policy requires broad permissions for SSO and Identity Store operations, no credentials exposure risk"
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: "sts:AssumeRole"
+      Policies:
+        - PolicyName: ListGroupsPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - "s3:GetObject"
+                Resource: !Sub "arn:aws:s3:::${S3SourceBucketName}/${ListGroupsS3Key}"
+              - Effect: Allow
+                Action:
+                  - "logs:CreateLogGroup"
+                  - "logs:CreateLogStream"
+                  - "logs:PutLogEvents"
+                Resource: !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/${StackName}-ListGroups-function:*"
+              - Effect: Allow
+                Action:
+                  - "dynamodb:PutItem"
+                Resource: !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/AriaIdCGroups"
+              - Effect: Allow
+                Action:
+                  - "identitystore:ListGroups"
+                  - "sso:ListInstances"
+                Resource: "*"
+      Tags:
+        - Key: aria
+          Value: role
+
+  ListGroupsFunction:
+    Type: "AWS::Lambda::Function"
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: "VPC not required for this Lambda function accessing AWS services"
+      checkov:
+        skip:
+          - id: CKV_AWS_116
+            comment: "DLQ not required for this Lambda function as it's invoked by Step Functions with built-in error handling"
+          - id: CKV_AWS_173
+            comment: "Default Lambda environment variable encryption is sufficient for this function"
+          - id: CKV_AWS_117
+            comment: "VPC not required for this Lambda function accessing AWS services"
+    Properties:
+      FunctionName: !Sub "${StackName}-ListGroups-function"
+      Handler: !Ref PythonHandler
+      Role: !GetAtt ListGroupsRole.Arn
+      Code:
+        S3Bucket: !Ref S3SourceBucketName
+        S3Key: !Ref ListGroupsS3Key
+      Runtime: python3.13
+      Timeout: 300
+      MemorySize: 256
+      Environment:
+        Variables:
+          STACK_NAME: !Ref StackName
+          PYTHON_PATH: "/var/task"
+      TracingConfig:
+        Mode: Active
+      Architectures:
+        - arm64
+      ReservedConcurrentExecutions: 3
+      Tags:
+        - Key: aria
+          Value: function
+
+  ListGroupsLogGroup:
+    Type: "AWS::Logs::LogGroup"
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W84
+            reason: "Default CloudWatch Logs encryption is sufficient for this log group"
+      checkov:
+        skip:
+          - id: CKV_AWS_158
+            comment: "Default CloudWatch Logs encryption is sufficient for this log group"
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/${StackName}-ListGroups-function"
+      RetentionInDays: 30
+      Tags:
+        - Key: aria
+          Value: log
+
+  # ListGroupMembership Lambda
+  ListGroupMembershipRole:
+    Type: AWS::IAM::Role
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W11
+            reason: "SSO and Identity Store services require * resource for ListGroups, ListGroupMemberships, and ListInstances operations"
+      checkov:
+        skip:
+          - id: CKV_AWS_107
+            comment: "IAM policy requires broad permissions for SSO and Identity Store operations, no credentials exposure risk"
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: "sts:AssumeRole"
+      Policies:
+        - PolicyName: ListGroupMembershipPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - "s3:GetObject"
+                Resource: !Sub "arn:aws:s3:::${S3SourceBucketName}/${ListGroupMembershipS3Key}"
+              - Effect: Allow
+                Action:
+                  - "logs:CreateLogGroup"
+                  - "logs:CreateLogStream"
+                  - "logs:PutLogEvents"
+                Resource: !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/${StackName}-ListGroupMembership-function:*"
+              - Effect: Allow
+                Action:
+                  - "dynamodb:PutItem"
+                  - "dynamodb:Scan"
+                Resource:
+                  - !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/AriaIdCGroupMembership"
+                  - !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/AriaIdCGroups"
+              - Effect: Allow
+                Action:
+                  - "identitystore:ListGroups"
+                  - "identitystore:ListGroupMemberships"
+                  - "sso:ListInstances"
+                Resource: "*"
+      Tags:
+        - Key: aria
+          Value: role
+
+  ListGroupMembershipFunction:
+    Type: "AWS::Lambda::Function"
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: "VPC not required for this Lambda function accessing AWS services"
+      checkov:
+        skip:
+          - id: CKV_AWS_116
+            comment: "DLQ not required for this Lambda function as it's invoked by Step Functions with built-in error handling"
+          - id: CKV_AWS_173
+            comment: "Default Lambda environment variable encryption is sufficient for this function"
+          - id: CKV_AWS_117
+            comment: "VPC not required for this Lambda function accessing AWS services"
+    Properties:
+      FunctionName: !Sub "${StackName}-ListGroupMembership-function"
+      Handler: !Ref PythonHandler
+      Role: !GetAtt ListGroupMembershipRole.Arn
+      Code:
+        S3Bucket: !Ref S3SourceBucketName
+        S3Key: !Ref ListGroupMembershipS3Key
+      Runtime: python3.13
+      Timeout: 300
+      MemorySize: 256
+      Environment:
+        Variables:
+          STACK_NAME: !Ref StackName
+          PYTHON_PATH: "/var/task"
+      TracingConfig:
+        Mode: Active
+      Architectures:
+        - arm64
+      ReservedConcurrentExecutions: 3
+      Tags:
+        - Key: aria
+          Value: function
+
+  ListGroupMembershipLogGroup:
+    Type: "AWS::Logs::LogGroup"
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W84
+            reason: "Default CloudWatch Logs encryption is sufficient for this log group"
+      checkov:
+        skip:
+          - id: CKV_AWS_158
+            comment: "Default CloudWatch Logs encryption is sufficient for this log group"
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/${StackName}-ListGroupMembership-function"
+      RetentionInDays: 30
+      Tags:
+        - Key: aria
+          Value: log
+
+  # ListPermissionSets Lambda
+  ListPermissionSetsRole:
+    Type: AWS::IAM::Role
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W11
+            reason: "SSO service requires * resource for ListGroups, ListInstances, ListPermissionSets, and DescribePermissionSet operations"
+      checkov:
+        skip:
+          - id: CKV_AWS_107
+            comment: "IAM policy requires broad permissions for SSO operations, no credentials exposure risk"
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: "sts:AssumeRole"
+      Policies:
+        - PolicyName: ListPermissionSetsPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - "s3:GetObject"
+                Resource: !Sub "arn:aws:s3:::${S3SourceBucketName}/${ListPermissionSetsS3Key}"
+              - Effect: Allow
+                Action:
+                  - "logs:CreateLogGroup"
+                  - "logs:CreateLogStream"
+                  - "logs:PutLogEvents"
+                Resource: !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/${StackName}-ListPermissionSets-function:*"
+              - Effect: Allow
+                Action:
+                  - "dynamodb:PutItem"
+                Resource: !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/AriaIdCPermissionSets"
+              - Effect: Allow
+                Action:
+                  - "identitystore:ListGroups"
+                  - "sso:ListInstances"
+                  - "sso:ListPermissionSets"
+                  - "sso:DescribePermissionSet"
+                Resource: "*"
+      Tags:
+        - Key: aria
+          Value: role
+
+  ListPermissionSetsFunction:
+    Type: "AWS::Lambda::Function"
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: "VPC not required for this Lambda function accessing AWS services"
+      checkov:
+        skip:
+          - id: CKV_AWS_116
+            comment: "DLQ not required for this Lambda function as it's invoked by Step Functions with built-in error handling"
+          - id: CKV_AWS_173
+            comment: "Default Lambda environment variable encryption is sufficient for this function"
+          - id: CKV_AWS_117
+            comment: "VPC not required for this Lambda function accessing AWS services"
+    Properties:
+      FunctionName: !Sub "${StackName}-ListPermissionSets-function"
+      Handler: !Ref PythonHandler
+      Role: !GetAtt ListPermissionSetsRole.Arn
+      Code:
+        S3Bucket: !Ref S3SourceBucketName
+        S3Key: !Ref ListPermissionSetsS3Key
+      Runtime: python3.13
+      Timeout: 300
+      MemorySize: 256
+      Environment:
+        Variables:
+          STACK_NAME: !Ref StackName
+          PYTHON_PATH: "/var/task"
+      TracingConfig:
+        Mode: Active
+      Architectures:
+        - arm64
+      ReservedConcurrentExecutions: 3
+      Tags:
+        - Key: aria
+          Value: function
+
+  ListPermissionSetsLogGroup:
+    Type: "AWS::Logs::LogGroup"
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W84
+            reason: "Default CloudWatch Logs encryption is sufficient for this log group"
+      checkov:
+        skip:
+          - id: CKV_AWS_158
+            comment: "Default CloudWatch Logs encryption is sufficient for this log group"
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/${StackName}-ListPermissionSets-function"
+      RetentionInDays: 30
+      Tags:
+        - Key: aria
+          Value: log
+
+  # ListProvisionedPermissionSets Lambda
+  ListProvisionedPermissionSetsRole:
+    Type: AWS::IAM::Role
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W11
+            reason: "SSO and Organizations services require * resource for ListInstances, ListPermissionSetsProvisionedToAccount, ListAccounts, and DescribeOrganization operations"
+      checkov:
+        skip:
+          - id: CKV_AWS_107
+            comment: "IAM policy requires broad permissions for SSO and Organizations operations, no credentials exposure risk"
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: "sts:AssumeRole"
+      Policies:
+        - PolicyName: ListProvisionedPermissionSetsPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - "s3:GetObject"
+                Resource: !Sub "arn:aws:s3:::${S3SourceBucketName}/${ListProvisionedPermissionSetsS3Key}"
+              - Effect: Allow
+                Action:
+                  - "logs:CreateLogGroup"
+                  - "logs:CreateLogStream"
+                  - "logs:PutLogEvents"
+                Resource: !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/${StackName}-ListProvisionedPermissionSets-function:*"
+              - Effect: Allow
+                Action:
+                  - "dynamodb:PutItem"
+                  - "dynamodb:Scan"
+                  - "dynamodb:UpdateItem"
+                  - "dynamodb:DeleteItem"
+                  - "dynamodb:BatchWriteItem"
+                Resource: !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/AriaIdCProvisionedPermissionSets"
+              - Effect: Allow
+                Action:
+                  - "sso:ListInstances"
+                  - "sso:ListPermissionSetsProvisionedToAccount"
+                  - "organizations:ListAccounts"
+                  - "organizations:DescribeOrganization"
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - "dynamodb:Scan"
+                Resource:
+                  - !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/AriaIdCAccounts"
+                  - !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/AriaIdCPermissionSets"
+      Tags:
+        - Key: aria
+          Value: role
+
+  ListProvisionedPermissionSetsFunction:
+    Type: "AWS::Lambda::Function"
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: "VPC not required for this Lambda function accessing AWS services"
+      checkov:
+        skip:
+          - id: CKV_AWS_116
+            comment: "DLQ not required for this Lambda function as it's invoked by Step Functions with built-in error handling"
+          - id: CKV_AWS_173
+            comment: "Default Lambda environment variable encryption is sufficient for this function"
+          - id: CKV_AWS_117
+            comment: "VPC not required for this Lambda function accessing AWS services"
+    Properties:
+      FunctionName: !Sub "${StackName}-ListProvisionedPermissionSets-function"
+      Handler: !Ref PythonHandler
+      Role: !GetAtt ListProvisionedPermissionSetsRole.Arn
+      Code:
+        S3Bucket: !Ref S3SourceBucketName
+        S3Key: !Ref ListProvisionedPermissionSetsS3Key
+      Runtime: python3.13
+      Timeout: 300
+      MemorySize: 256
+      Environment:
+        Variables:
+          STACK_NAME: !Ref StackName
+          PYTHON_PATH: "/var/task"
+      TracingConfig:
+        Mode: Active
+      Architectures:
+        - arm64
+      ReservedConcurrentExecutions: 3
+      Tags:
+        - Key: aria
+          Value: function
+
+  ListProvisionedPermissionSetsLogGroup:
+    Type: "AWS::Logs::LogGroup"
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W84
+            reason: "Default CloudWatch Logs encryption is sufficient for this log group"
+      checkov:
+        skip:
+          - id: CKV_AWS_158
+            comment: "Default CloudWatch Logs encryption is sufficient for this log group"
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/${StackName}-ListProvisionedPermissionSets-function"
+      RetentionInDays: 30
+      Tags:
+        - Key: aria
+          Value: log
+
+  # ListAccounts Lambda
+  ListAccountsRole:
+    Type: AWS::IAM::Role
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W11
+            reason: "Organizations service requires * resource for ListAccounts operation"
+      checkov:
+        skip:
+          - id: CKV_AWS_107
+            comment: "IAM policy requires broad permissions for Organizations operations, no credentials exposure risk"
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: "sts:AssumeRole"
+      Policies:
+        - PolicyName: ListAccountsPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - "s3:GetObject"
+                Resource: !Sub "arn:aws:s3:::${S3SourceBucketName}/${ListAccountsS3Key}"
+              - Effect: Allow
+                Action:
+                  - "logs:CreateLogGroup"
+                  - "logs:CreateLogStream"
+                  - "logs:PutLogEvents"
+                Resource: !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/${StackName}-ListAccounts-function:*"
+              - Effect: Allow
+                Action:
+                  - "dynamodb:PutItem"
+                Resource: !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/AriaIdCAccounts"
+              - Effect: Allow
+                Action:
+                  - "organizations:ListAccounts"
+                Resource: "*"
+      Tags:
+        - Key: aria
+          Value: role
+
+  ListAccountsFunction:
+    Type: "AWS::Lambda::Function"
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: "VPC not required for this Lambda function accessing AWS services"
+      checkov:
+        skip:
+          - id: CKV_AWS_116
+            comment: "DLQ not required for this Lambda function as it's invoked by Step Functions with built-in error handling"
+          - id: CKV_AWS_173
+            comment: "Default Lambda environment variable encryption is sufficient for this function"
+          - id: CKV_AWS_117
+            comment: "VPC not required for this Lambda function accessing AWS services"
+    Properties:
+      FunctionName: !Sub "${StackName}-ListAccounts-function"
+      Handler: !Ref PythonHandler
+      Role: !GetAtt ListAccountsRole.Arn
+      Code:
+        S3Bucket: !Ref S3SourceBucketName
+        S3Key: !Ref ListAccountsS3Key
+      Runtime: python3.13
+      Timeout: 300
+      MemorySize: 256
+      Environment:
+        Variables:
+          STACK_NAME: !Ref StackName
+          PYTHON_PATH: "/var/task"
+      TracingConfig:
+        Mode: Active
+      Architectures:
+        - arm64
+      ReservedConcurrentExecutions: 3
+      Tags:
+        - Key: aria
+          Value: function
+
+  ListAccountsLogGroup:
+    Type: "AWS::Logs::LogGroup"
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W84
+            reason: "Default CloudWatch Logs encryption is sufficient for this log group"
+      checkov:
+        skip:
+          - id: CKV_AWS_158
+            comment: "Default CloudWatch Logs encryption is sufficient for this log group"
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/${StackName}-ListAccounts-function"
+      RetentionInDays: 30
+      Tags:
+        - Key: aria
+          Value: log
+
+  # ListUserAccountAssignments Lambda
+  ListUserAccountAssignmentsRole:
+    Type: AWS::IAM::Role
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W11
+            reason: "SSO and Organizations services require * resource for specific operations"
+      checkov:
+        skip:
+          - id: CKV_AWS_107
+            comment: "IAM policy requires broad permissions for SSO and Organizations operations, no credentials exposure risk"
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: "sts:AssumeRole"
+      Policies:
+        - PolicyName: ListUserAccountAssignmentsPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - "s3:GetObject"
+                Resource: !Sub "arn:aws:s3:::${S3SourceBucketName}/${ListUserAccountAssignmentsS3Key}"
+              - Effect: Allow
+                Action:
+                  - "logs:CreateLogGroup"
+                  - "logs:CreateLogStream"
+                  - "logs:PutLogEvents"
+                Resource: !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/${StackName}-ListUserAccountAssignments-function:*"
+              - Effect: Allow
+                Action:
+                  - "dynamodb:PutItem"
+                Resource: !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/AriaIdCUserAccountAssignments"
+              - Effect: Allow
+                Action:
+                  - "dynamodb:GetItem"
+                  - "dynamodb:Scan"
+                Resource:
+                  - !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/AriaIdCPermissionSets"
+                  - !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/AriaIdCAccounts"
+                  - !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/AriaIdCUsers"
+              - Effect: Allow
+                Action:
+                  - "sso:ListInstances"
+                  - "sso:ListPermissionSetsProvisionedToAccount"
+                  - "sso:ListAccountAssignmentsForPrincipal"
+                  - "organizations:ListAccounts"
+                  - "organizations:DescribeOrganization"
+                Resource: "*"
+      Tags:
+        - Key: aria
+          Value: role
+
+  ListUserAccountAssignmentsFunction:
+    Type: "AWS::Lambda::Function"
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: "VPC not required for this Lambda function accessing AWS services"
+      checkov:
+        skip:
+          - id: CKV_AWS_116
+            comment: "DLQ not required for this Lambda function as it's invoked by Step Functions with built-in error handling"
+          - id: CKV_AWS_173
+            comment: "Default Lambda environment variable encryption is sufficient for this function"
+          - id: CKV_AWS_117
+            comment: "VPC not required for this Lambda function accessing AWS services"
+    Properties:
+      FunctionName: !Sub "${StackName}-ListUserAccountAssignments-function"
+      Handler: !Ref PythonHandler
+      Role: !GetAtt ListUserAccountAssignmentsRole.Arn
+      Code:
+        S3Bucket: !Ref S3SourceBucketName
+        S3Key: !Ref ListUserAccountAssignmentsS3Key
+      Runtime: python3.13
+      Timeout: 300
+      MemorySize: 256
+      Environment:
+        Variables:
+          STACK_NAME: !Ref StackName
+          PYTHON_PATH: "/var/task"
+      TracingConfig:
+        Mode: Active
+      Architectures:
+        - arm64
+      ReservedConcurrentExecutions: 3
+      Tags:
+        - Key: aria
+          Value: function
+
+  ListUserAccountAssignmentsLogGroup:
+    Type: "AWS::Logs::LogGroup"
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:  
+          - id: W84
+            reason: "Default CloudWatch Logs encryption is sufficient for this log group"
+      checkov:
+        skip:
+          - id: CKV_AWS_158
+            comment: "Default CloudWatch Logs encryption is sufficient for this log group"
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/${StackName}-ListUserAccountAssignments-function"
+      RetentionInDays: 30
+      Tags:
+        - Key: aria
+          Value: log
+
+  # ListGroupAccountAssignments Lambda
+  ListGroupAccountAssignmentsRole:
+    Type: AWS::IAM::Role
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W11
+            reason: "SSO and Organizations services require '*' resource for ListInstances, ListPermissionSetsProvisionedToAccount, ListAccountAssignmentsForPrincipal, ListAccounts, and DescribeOrganization operations"
+      checkov:
+        skip:
+          - id: CKV_AWS_107
+            comment: "IAM policy requires broad permissions for SSO and Organizations operations, no credentials exposure risk"
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: "sts:AssumeRole"
+      Policies:
+        - PolicyName: ListGroupAccountAssignmentsPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - "s3:GetObject"
+                Resource: !Sub "arn:aws:s3:::${S3SourceBucketName}/${ListGroupAccountAssignmentsS3Key}"
+              - Effect: Allow
+                Action:
+                  - "logs:CreateLogGroup"
+                  - "logs:CreateLogStream"
+                  - "logs:PutLogEvents"
+                Resource: !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/${StackName}-ListGroupAccountAssignments-function:*"
+              - Effect: Allow
+                Action:
+                  - "dynamodb:PutItem"
+                  - "dynamodb:Scan"
+                  - "dynamodb:DeleteItem"
+                  - "dynamodb:UpdateItem"
+                  - "dynamodb:BatchWriteItem"
+                Resource: !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/AriaIdCGroupAccountAssignments"
+              - Effect: Allow
+                Action:
+                  - "dynamodb:GetItem"
+                  - "dynamodb:Scan"
+                Resource:
+                  - !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/AriaIdCPermissionSets"
+                  - !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/AriaIdCAccounts"
+                  - !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/AriaIdCGroups"
+              - Effect: Allow
+                Action:
+                  - "sso:ListInstances"
+                  - "sso:ListPermissionSetsProvisionedToAccount"
+                  - "sso:ListAccountAssignmentsForPrincipal"
+                  - "organizations:ListAccounts"
+                  - "organizations:DescribeOrganization"
+                Resource: "*"
+      Tags:
+        - Key: aria
+          Value: role
+
+  ListGroupAccountAssignmentsFunction:
+    Type: "AWS::Lambda::Function"
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: "VPC not required for this Lambda function accessing AWS services"
+      checkov:
+        skip:
+          - id: CKV_AWS_116
+            comment: "DLQ not required for this Lambda function as it's invoked by Step Functions with built-in error handling"
+          - id: CKV_AWS_173
+            comment: "Default Lambda environment variable encryption is sufficient for this function"
+          - id: CKV_AWS_117
+            comment: "VPC not required for this Lambda function accessing AWS services"
+    Properties:
+      FunctionName: !Sub "${StackName}-ListGroupAccountAssignments-function"
+      Handler: !Ref PythonHandler
+      Role: !GetAtt ListGroupAccountAssignmentsRole.Arn
+      Code:
+        S3Bucket: !Ref S3SourceBucketName
+        S3Key: !Ref ListGroupAccountAssignmentsS3Key
+      Runtime: python3.13
+      Timeout: 300
+      MemorySize: 256
+      Environment:
+        Variables:
+          STACK_NAME: !Ref StackName
+          PYTHON_PATH: "/var/task"
+      TracingConfig:
+        Mode: Active
+      Architectures:
+        - arm64
+      ReservedConcurrentExecutions: 3
+      Tags:
+        - Key: aria
+          Value: function
+
+  ListGroupAccountAssignmentsLogGroup:
+    Type: "AWS::Logs::LogGroup"
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W84
+            reason: "Default CloudWatch Logs encryption is sufficient for this log group"
+      checkov:
+        skip:
+          - id: CKV_AWS_158
+            comment: "Default CloudWatch Logs encryption is sufficient for this log group"
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/${StackName}-ListGroupAccountAssignments-function"
+      RetentionInDays: 30
+      Tags:
+        - Key: aria
+          Value: log
+
+  # GetIAMRoles Lambda Execution Role
+  GetIAMRolesExecutionRole:
+    Type: AWS::IAM::Role
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W11
+            reason: "Organizations and STS services require '*' resource for ListAccounts and AssumeRole operations across multiple accounts"
+      checkov:
+        skip:
+          - id: CKV_AWS_107
+            comment: "IAM policy requires broad permissions for Organizations and STS operations, no credentials exposure risk"
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: "sts:AssumeRole"
+      Policies:
+        - PolicyName: GetIAMRolesPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - "s3:GetObject"
+                Resource: !Sub "arn:aws:s3:::${S3SourceBucketName}/${GetIAMRolesS3Key}"
+              - Effect: Allow
+                Action:
+                  - "logs:CreateLogGroup"
+                  - "logs:CreateLogStream"
+                  - "logs:PutLogEvents"
+                Resource: !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/${StackName}-GetIAMRoles-function:*"
+              - Effect: Allow
+                Action:
+                  - "dynamodb:PutItem"
+                  - "dynamodb:Scan"
+                  - "dynamodb:UpdateItem"
+                  - "dynamodb:DeleteItem"
+                  - "dynamodb:BatchWriteItem"
+                  - "dynamodb:GetItem"
+                Resource:
+                  - !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/AriaIdCIAMRoles"
+                  - !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/AriaIdCProvisionedPermissionSets"
+                  - !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/AriaIdCAccounts"
+              - Effect: Allow
+                Action:
+                  - "organizations:ListAccounts"
+                  - "sts:AssumeRole"
+                Resource: "*"
+      Tags:
+        - Key: aria
+          Value: role
+
+  GetIAMRolesFunction:
+    Type: "AWS::Lambda::Function"
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: "VPC not required for this Lambda function accessing AWS services"
+      checkov:
+        skip:
+          - id: CKV_AWS_116
+            comment: "DLQ not required for this Lambda function as it's invoked by Step Functions with built-in error handling"
+          - id: CKV_AWS_173
+            comment: "Default Lambda environment variable encryption is sufficient for this function"
+          - id: CKV_AWS_117
+            comment: "VPC not required for this Lambda function accessing AWS services"
+    Properties:
+      FunctionName: !Sub "${StackName}-GetIAMRoles-function"
+      Handler: !Ref PythonHandler
+      Role: !GetAtt GetIAMRolesExecutionRole.Arn
+      Code:
+        S3Bucket: !Ref S3SourceBucketName
+        S3Key: !Ref GetIAMRolesS3Key
+      Runtime: python3.13
+      Timeout: 300
+      MemorySize: 256
+      Environment:
+        Variables:
+          STACK_NAME: !Ref StackName
+          PYTHON_PATH: "/var/task"
+      TracingConfig:
+        Mode: Active
+      Architectures:
+        - arm64
+      ReservedConcurrentExecutions: 3
+      Tags:
+        - Key: aria
+          Value: function
+
+  GetIAMRolesLogGroup:
+    Type: "AWS::Logs::LogGroup"
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W84
+            reason: "Default CloudWatch Logs encryption is sufficient for this log group"
+      checkov:
+        skip:
+          - id: CKV_AWS_158
+            comment: "Default CloudWatch Logs encryption is sufficient for this log group"
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/${StackName}-GetIAMRoles-function"
+      RetentionInDays: 30
+      Tags:
+        - Key: aria
+          Value: log
+
+  # S3Export Lambda
+  S3ExportRole:
+    Type: AWS::IAM::Role
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: "sts:AssumeRole"
+      Policies:
+        - PolicyName: S3ExportPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - "s3:GetObject"
+                Resource: !Sub "arn:aws:s3:::${S3SourceBucketName}/${S3ExportS3Key}"
+              - Effect: Allow
+                Action:
+                  - "logs:CreateLogGroup"
+                  - "logs:CreateLogStream"
+                  - "logs:PutLogEvents"
+                Resource: !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/${StackName}-S3Export-function:*"
+              - Effect: Allow
+                Action:
+                  - "dynamodb:GetItem"
+                  - "dynamodb:Scan"
+                Resource: !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/AriaIdC*"
+              - Effect: Allow
+                Action:
+                  - "s3:PutObject"
+                  - "s3:DeleteObject"
+                Resource: !Sub "arn:aws:s3:::${S3ExportBucketName}/*"
+      Tags:
+        - Key: aria
+          Value: role
+
+  S3ExportFunction:
+    Type: "AWS::Lambda::Function"
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: "VPC not required for this Lambda function accessing AWS services"
+      checkov:
+        skip:
+          - id: CKV_AWS_116
+            comment: "DLQ not required for this Lambda function as it's invoked by Step Functions with built-in error handling"
+          - id: CKV_AWS_173
+            comment: "Default Lambda environment variable encryption is sufficient for this function"
+          - id: CKV_AWS_117
+            comment: "VPC not required for this Lambda function accessing AWS services"
+    Properties:
+      FunctionName: !Sub "${StackName}-S3Export-function"
+      Handler: !Ref PythonHandler
+      Role: !GetAtt S3ExportRole.Arn
+      Code:
+        S3Bucket: !Ref S3SourceBucketName
+        S3Key: !Ref S3ExportS3Key
+      Runtime: python3.13
+      Timeout: 300
+      MemorySize: 256
+      Environment:
+        Variables:
+          STACK_NAME: !Ref StackName
+          PYTHON_PATH: "/var/task"
+      TracingConfig:
+        Mode: Active
+      Architectures:
+        - arm64
+      ReservedConcurrentExecutions: 3
+      Tags:
+        - Key: aria
+          Value: function
+
+  S3ExportLogGroup:
+    Type: "AWS::Logs::LogGroup"
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W84
+            reason: "Default CloudWatch Logs encryption is sufficient for this log group"
+      checkov:
+        skip:
+          - id: CKV_AWS_158
+            comment: "Default CloudWatch Logs encryption is sufficient for this log group"
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/${StackName}-S3Export-function"
+      RetentionInDays: 30
+      Tags:
+        - Key: aria
+          Value: log
+
+  # AccessAnalyzerFindingIngestion Lambda
+  AccessAnalyzerFindingIngestionRole:
+    Type: AWS::IAM::Role
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W11
+            reason: "Access Analyzer service requires '*' resource for ListFindings operation across all analyzers"
+      checkov:
+        skip:
+          - id: CKV_AWS_107
+            comment: "IAM policy requires broad permissions for Access Analyzer operations, no credentials exposure risk"
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: "sts:AssumeRole"
+      Policies:
+        - PolicyName: AccessAnalyzerFindingIngestionPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - "s3:GetObject"
+                Resource: !Sub "arn:aws:s3:::${S3SourceBucketName}/${AccessAnalyzerFindingIngestionS3Key}"
+              - Effect: Allow
+                Action:
+                  - "logs:CreateLogGroup"
+                  - "logs:CreateLogStream"
+                  - "logs:PutLogEvents"
+                Resource: !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/${StackName}-AccessAnalyzerFindingIngestion-function:*"
+              - Effect: Allow
+                Action:
+                  - "dynamodb:PutItem"
+                  - "dynamodb:UpdateItem"
+                  - "dynamodb:DeleteItem"
+                Resource:
+                  - !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/AriaIdCInternalAAFindings"
+                  - !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/AriaIdCUnusedAAFindings"
+                  - !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/AriaIdCExternalAAFindings"
+      Tags:
+        - Key: aria
+          Value: role
+
+  AccessAnalyzerFindingIngestionFunction:
+    Type: "AWS::Lambda::Function"
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: "VPC not required for this Lambda function accessing AWS services"
+      checkov:
+        skip:
+          - id: CKV_AWS_116
+            comment: "DLQ not required for this Lambda function as it's invoked by Step Functions with built-in error handling"
+          - id: CKV_AWS_173
+            comment: "Default Lambda environment variable encryption is sufficient for this function"
+          - id: CKV_AWS_117
+            comment: "VPC not required for this Lambda function accessing AWS services"
+    Properties:
+      FunctionName: !Sub "${StackName}-AccessAnalyzerFindingIngestion-function"
+      Handler: !Ref PythonHandler
+      Role: !GetAtt AccessAnalyzerFindingIngestionRole.Arn
+      Code:
+        S3Bucket: !Ref S3SourceBucketName
+        S3Key: !Ref AccessAnalyzerFindingIngestionS3Key
+      Runtime: python3.13
+      Timeout: 300
+      MemorySize: 256
+      Environment:
+        Variables:
+          STACK_NAME: !Ref StackName
+          PYTHON_PATH: "/var/task"
+      TracingConfig:
+        Mode: Active
+      Architectures:
+        - arm64
+      ReservedConcurrentExecutions: 3
+      Tags:
+        - Key: aria
+          Value: function
+
+  AccessAnalyzerFindingIngestionLogGroup:
+    Type: "AWS::Logs::LogGroup"
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W84
+            reason: "Default CloudWatch Logs encryption is sufficient for this log group"
+      checkov:
+        skip:
+          - id: CKV_AWS_158
+            comment: "Default CloudWatch Logs encryption is sufficient for this log group"
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/${StackName}-AccessAnalyzerFindingIngestion-function"
+      RetentionInDays: 30
+      Tags:
+        - Key: aria
+          Value: log
+
+  # UpdateFunctionCode Lambda
+  UpdateFunctionCodeRole:
+    Type: AWS::IAM::Role
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: "sts:AssumeRole"
+      Policies:
+        - PolicyName: UpdateFunctionCodePolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - "s3:GetObject"
+                Resource: !Sub "arn:aws:s3:::${S3SourceBucketName}/*"
+              - Effect: Allow
+                Action:
+                  - "logs:CreateLogGroup"
+                  - "logs:CreateLogStream"
+                  - "logs:PutLogEvents"
+                Resource: !Sub "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/${StackName}-UpdateFunctionCode-function:*"
+              - Effect: Allow
+                Action:
+                  - "ssm:GetParameter*"
+                Resource: !Sub "arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/aria/lambda/*"
+              - Effect: Allow
+                Action:
+                  - "lambda:UpdateFunctionCode"
+                Resource: !Sub "arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:${StackName}-*"
+      Tags:
+        - Key: aria
+          Value: role
+
+  UpdateFunctionCodeFunction:
+    Type: "AWS::Lambda::Function"
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: "VPC not required for this Lambda function accessing AWS services"
+      checkov:
+        skip:
+          - id: CKV_AWS_116
+            comment: "DLQ not required for this Lambda function as it's invoked by Step Functions with built-in error handling"
+          - id: CKV_AWS_173
+            comment: "Default Lambda environment variable encryption is sufficient for this function"
+          - id: CKV_AWS_117
+            comment: "VPC not required for this Lambda function accessing AWS services"
+    Properties:
+      FunctionName: !Sub "${StackName}-UpdateFunctionCode-function"
+      Handler: !Ref PythonHandler
+      Role: !GetAtt UpdateFunctionCodeRole.Arn
+      Code:
+        S3Bucket: !Ref S3SourceBucketName
+        S3Key: !Ref UpdateFunctionCodeS3Key
+      Runtime: python3.13
+      Timeout: 300
+      MemorySize: 256
+      Environment:
+        Variables:
+          STACK_NAME: !Ref StackName
+          PYTHON_PATH: "/var/task"
+      TracingConfig:
+        Mode: Active
+      Architectures:
+        - arm64
+      ReservedConcurrentExecutions: 3
+      Tags:
+        - Key: aria
+          Value: function
+
+  UpdateFunctionCodeLogGroup:
+    Type: "AWS::Logs::LogGroup"
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W84
+            reason: "Default CloudWatch Logs encryption is sufficient for this log group"
+      checkov:
+        skip:
+          - id: CKV_AWS_158
+            comment: "Default CloudWatch Logs encryption is sufficient for this log group"
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/${StackName}-UpdateFunctionCode-function"
+      RetentionInDays: 30
+      Tags:
+        - Key: aria
+          Value: log
+
+Outputs:
+  CreateTablesLambdaArn:
+    Value: !GetAtt CreateTablesFunction.Arn
+  CreateTablesLambdaName:
+    Value: !Ref CreateTablesFunction
+  ListUsersLambdaArn:
+    Value: !GetAtt ListUsersFunction.Arn
+  ListUsersLambdaName:
+    Value: !Ref ListUsersFunction
+  ListGroupsLambdaArn:
+    Value: !GetAtt ListGroupsFunction.Arn
+  ListGroupsLambdaName:
+    Value: !Ref ListGroupsFunction
+  ListGroupMembershipLambdaArn:
+    Value: !GetAtt ListGroupMembershipFunction.Arn
+  ListGroupMembershipLambdaName:
+    Value: !Ref ListGroupMembershipFunction
+  ListPermissionSetsLambdaArn:
+    Value: !GetAtt ListPermissionSetsFunction.Arn
+  ListPermissionSetsLambdaName:
+    Value: !Ref ListPermissionSetsFunction
+  ListProvisionedPermissionSetsLambdaArn:
+    Value: !GetAtt ListProvisionedPermissionSetsFunction.Arn
+  ListProvisionedPermissionSetsLambdaName:
+    Value: !Ref ListProvisionedPermissionSetsFunction
+  ListAccountsLambdaArn:
+    Value: !GetAtt ListAccountsFunction.Arn
+  ListAccountsLambdaName:
+    Value: !Ref ListAccountsFunction
+  ListUserAccountAssignmentsLambdaArn:
+    Value: !GetAtt ListUserAccountAssignmentsFunction.Arn
+  ListUserAccountAssignmentsLambdaName:
+    Value: !Ref ListUserAccountAssignmentsFunction
+  ListGroupAccountAssignmentsLambdaArn:
+    Value: !GetAtt ListGroupAccountAssignmentsFunction.Arn
+  ListGroupAccountAssignmentsLambdaName:
+    Value: !Ref ListGroupAccountAssignmentsFunction
+  GetIAMRolesLambdaArn:
+    Value: !GetAtt GetIAMRolesFunction.Arn
+  GetIAMRolesLambdaName:
+    Value: !Ref GetIAMRolesFunction
+  GetIAMRolesLambdaExecutionRoleArn:
+    Value: !GetAtt GetIAMRolesExecutionRole.Arn
+  S3ExportLambdaArn:
+    Value: !GetAtt S3ExportFunction.Arn
+  S3ExportLambdaName:
+    Value: !Ref S3ExportFunction
+  AccessAnalyzerFindingIngestionLambdaArn:
+    Value: !GetAtt AccessAnalyzerFindingIngestionFunction.Arn
+  AccessAnalyzerFindingIngestionLambdaName:
+    Value: !Ref AccessAnalyzerFindingIngestionFunction
+  UpdateFunctionCodeLambdaArn:
+    Value: !GetAtt UpdateFunctionCodeFunction.Arn
+  UpdateFunctionCodeLambdaName:
+    Value: !Ref UpdateFunctionCodeFunction

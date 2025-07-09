@@ -1,0 +1,257 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'SSM Parameters for Lambda function ARNs - Workforce Identity Visualization'
+
+Parameters:
+  CreateTablesS3Key:
+    Type: String
+    Description: S3 key for CreateTables Lambda function
+  ListUsersS3Key:
+    Type: String
+    Description: S3 key for ListUsers Lambda function
+  ListGroupsS3Key:
+    Type: String
+    Description: S3 key for ListGroups Lambda function
+  ListGroupMembershipS3Key:
+    Type: String
+    Description: S3 key for ListGroupMembership Lambda function
+  ListPermissionSetsS3Key:
+    Type: String
+    Description: S3 key for ListPermissionSets Lambda function
+  ListProvisionedPermissionSetsS3Key:
+    Type: String
+    Description: S3 key for ListProvisionedPermissionSets Lambda function
+  ListAccountsS3Key:
+    Type: String
+    Description: S3 key for ListAccounts Lambda function
+  ListUserAccountAssignmentsS3Key:
+    Type: String
+    Description: S3 key for ListUserAccountAssignments Lambda function
+  ListGroupAccountAssignmentsS3Key:
+    Type: String
+    Description: S3 key for ListGroupAccountAssignments Lambda function
+  GetIAMRolesS3Key:
+    Type: String
+    Description: S3 key for GetIAMRoles Lambda function
+  S3ExportS3Key:
+    Type: String
+    Description: S3 key for S3Export Lambda function
+  AccessAnalyzerFindingIngestionS3Key:
+    Type: String
+    Description: S3 key for AccessAnalyzerFindingIngestion Lambda function
+  UpdateFunctionCodeS3Key:
+    Type: String
+    Description: S3 key for UpdateFunctionCode Lambda function
+
+  # Lambda ARN Parameters
+  CreateTablesLambdaArn:
+    Type: String
+    Description: ARN of CreateTables Lambda function
+  ListUsersLambdaArn:
+    Type: String
+    Description: ARN of ListUsers Lambda function
+  ListGroupsLambdaArn:
+    Type: String
+    Description: ARN of ListGroups Lambda function
+  ListGroupMembershipLambdaArn:
+    Type: String
+    Description: ARN of ListGroupMembership Lambda function
+  ListPermissionSetsLambdaArn:
+    Type: String
+    Description: ARN of ListPermissionSets Lambda function
+  ListProvisionedPermissionSetsLambdaArn:
+    Type: String
+    Description: ARN of ListProvisionedPermissionSets Lambda function
+  ListAccountsLambdaArn:
+    Type: String
+    Description: ARN of ListAccounts Lambda function
+  ListUserAccountAssignmentsLambdaArn:
+    Type: String
+    Description: ARN of ListUserAccountAssignments Lambda function
+  ListGroupAccountAssignmentsLambdaArn:
+    Type: String
+    Description: ARN of ListGroupAccountAssignments Lambda function
+  GetIAMRolesLambdaArn:
+    Type: String
+    Description: ARN of GetIAMRoles Lambda function
+  S3ExportLambdaArn:
+    Type: String
+    Description: ARN of S3Export Lambda function
+  AccessAnalyzerFindingIngestionLambdaArn:
+    Type: String
+    Description: ARN of AccessAnalyzerFindingIngestion Lambda function
+  UpdateFunctionCodeLambdaArn:
+    Type: String
+    Description: ARN of UpdateFunctionCode Lambda function
+
+Resources:
+  # SSM Parameters for Lambda ARNs
+  CreateTablesLambdaArnSSMParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Join ['', ['/aria/lambda/', !Select [0, !Split ['.', !Ref CreateTablesS3Key]]]]
+      Type: String
+      Value: !Ref CreateTablesLambdaArn
+      Description: !Sub 'ARN for Lambda function ${CreateTablesS3Key}'
+      Tags:
+        aria: ssm
+
+  ListUsersLambdaArnSSMParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Join ['', ['/aria/lambda/', !Select [0, !Split ['.', !Ref ListUsersS3Key]]]]
+      Type: String
+      Value: !Ref ListUsersLambdaArn
+      Description: !Sub 'ARN for Lambda function ${ListUsersS3Key}'
+      Tags:
+        aria: ssm
+
+  ListGroupsLambdaArnSSMParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Join ['', ['/aria/lambda/', !Select [0, !Split ['.', !Ref ListGroupsS3Key]]]]
+      Type: String
+      Value: !Ref ListGroupsLambdaArn
+      Description: !Sub 'ARN for Lambda function ${ListGroupsS3Key}'
+      Tags:
+        aria: ssm
+
+  ListGroupMembershipLambdaArnSSMParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Join ['', ['/aria/lambda/', !Select [0, !Split ['.', !Ref ListGroupMembershipS3Key]]]]
+      Type: String
+      Value: !Ref ListGroupMembershipLambdaArn
+      Description: !Sub 'ARN for Lambda function ${ListGroupMembershipS3Key}'
+      Tags:
+        aria: ssm
+
+  ListPermissionSetsLambdaArnSSMParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Join ['', ['/aria/lambda/', !Select [0, !Split ['.', !Ref ListPermissionSetsS3Key]]]]
+      Type: String
+      Value: !Ref ListPermissionSetsLambdaArn
+      Description: !Sub 'ARN for Lambda function ${ListPermissionSetsS3Key}'
+      Tags:
+        aria: ssm
+
+  ListProvisionedPermissionSetsLambdaArnSSMParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Join ['', ['/aria/lambda/', !Select [0, !Split ['.', !Ref ListProvisionedPermissionSetsS3Key]]]]
+      Type: String
+      Value: !Ref ListProvisionedPermissionSetsLambdaArn
+      Description: !Sub 'ARN for Lambda function ${ListProvisionedPermissionSetsS3Key}'
+      Tags:
+        aria: ssm
+
+  ListAccountsLambdaArnSSMParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Join ['', ['/aria/lambda/', !Select [0, !Split ['.', !Ref ListAccountsS3Key]]]]
+      Type: String
+      Value: !Ref ListAccountsLambdaArn
+      Description: !Sub 'ARN for Lambda function ${ListAccountsS3Key}'
+      Tags:
+        aria: ssm
+
+  ListUserAccountAssignmentsLambdaArnSSMParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Join ['', ['/aria/lambda/', !Select [0, !Split ['.', !Ref ListUserAccountAssignmentsS3Key]]]]
+      Type: String
+      Value: !Ref ListUserAccountAssignmentsLambdaArn
+      Description: !Sub 'ARN for Lambda function ${ListUserAccountAssignmentsS3Key}'
+      Tags:
+        aria: ssm
+
+  ListGroupAccountAssignmentsLambdaArnSSMParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Join ['', ['/aria/lambda/', !Select [0, !Split ['.', !Ref ListGroupAccountAssignmentsS3Key]]]]
+      Type: String
+      Value: !Ref ListGroupAccountAssignmentsLambdaArn
+      Description: !Sub 'ARN for Lambda function ${ListGroupAccountAssignmentsS3Key}'
+      Tags:
+        aria: ssm
+
+  GetIAMRolesLambdaArnSSMParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Join ['', ['/aria/lambda/', !Select [0, !Split ['.', !Ref GetIAMRolesS3Key]]]]
+      Type: String
+      Value: !Ref GetIAMRolesLambdaArn
+      Description: !Sub 'ARN for Lambda function ${GetIAMRolesS3Key}'
+      Tags:
+        aria: ssm
+
+  S3ExportLambdaArnSSMParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Join ['', ['/aria/lambda/', !Select [0, !Split ['.', !Ref S3ExportS3Key]]]]
+      Type: String
+      Value: !Ref S3ExportLambdaArn
+      Description: !Sub 'ARN for Lambda function ${S3ExportS3Key}'
+      Tags:
+        aria: ssm
+
+  AccessAnalyzerFindingIngestionLambdaArnSSMParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Join ['', ['/aria/lambda/', !Select [0, !Split ['.', !Ref AccessAnalyzerFindingIngestionS3Key]]]]
+      Type: String
+      Value: !Ref AccessAnalyzerFindingIngestionLambdaArn
+      Description: !Sub 'ARN for Lambda function ${AccessAnalyzerFindingIngestionS3Key}'
+      Tags:
+        aria: ssm
+
+  UpdateFunctionCodeLambdaArnSSMParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Join ['', ['/aria/lambda/', !Select [0, !Split ['.', !Ref UpdateFunctionCodeS3Key]]]]
+      Type: String
+      Value: !Ref UpdateFunctionCodeLambdaArn
+      Description: !Sub 'ARN for Lambda function ${UpdateFunctionCodeS3Key}'
+      Tags:
+        aria: ssm
+
+Outputs:
+  CreateTablesSSMParameterName:
+    Description: Name of SSM parameter for CreateTables Lambda ARN
+    Value: !Ref CreateTablesLambdaArnSSMParameter
+  ListUsersSSMParameterName:
+    Description: Name of SSM parameter for ListUsers Lambda ARN
+    Value: !Ref ListUsersLambdaArnSSMParameter
+  ListGroupsSSMParameterName:
+    Description: Name of SSM parameter for ListGroups Lambda ARN
+    Value: !Ref ListGroupsLambdaArnSSMParameter
+  ListGroupMembershipSSMParameterName:
+    Description: Name of SSM parameter for ListGroupMembership Lambda ARN
+    Value: !Ref ListGroupMembershipLambdaArnSSMParameter
+  ListPermissionSetsSSMParameterName:
+    Description: Name of SSM parameter for ListPermissionSets Lambda ARN
+    Value: !Ref ListPermissionSetsLambdaArnSSMParameter
+  ListProvisionedPermissionSetsSSMParameterName:
+    Description: Name of SSM parameter for ListProvisionedPermissionSets Lambda ARN
+    Value: !Ref ListProvisionedPermissionSetsLambdaArnSSMParameter
+  ListAccountsSSMParameterName:
+    Description: Name of SSM parameter for ListAccounts Lambda ARN
+    Value: !Ref ListAccountsLambdaArnSSMParameter
+  ListUserAccountAssignmentsSSMParameterName:
+    Description: Name of SSM parameter for ListUserAccountAssignments Lambda ARN
+    Value: !Ref ListUserAccountAssignmentsLambdaArnSSMParameter
+  ListGroupAccountAssignmentsSSMParameterName:
+    Description: Name of SSM parameter for ListGroupAccountAssignments Lambda ARN
+    Value: !Ref ListGroupAccountAssignmentsLambdaArnSSMParameter
+  GetIAMRolesSSMParameterName:
+    Description: Name of SSM parameter for GetIAMRoles Lambda ARN
+    Value: !Ref GetIAMRolesLambdaArnSSMParameter
+  S3ExportSSMParameterName:
+    Description: Name of SSM parameter for S3Export Lambda ARN
+    Value: !Ref S3ExportLambdaArnSSMParameter
+  AccessAnalyzerFindingIngestionSSMParameterName:
+    Description: Name of SSM parameter for AccessAnalyzerFindingIngestion Lambda ARN
+    Value: !Ref AccessAnalyzerFindingIngestionLambdaArnSSMParameter
+  UpdateFunctionCodeSSMParameterName:
+    Description: Name of SSM parameter for UpdateFunctionCode Lambda ARN
+    Value: !Ref UpdateFunctionCodeLambdaArnSSMParameter

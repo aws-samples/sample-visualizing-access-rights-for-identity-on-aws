@@ -1,0 +1,578 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: "CloudFormation template to deploy Neptune graph and notebook instance"
+
+Parameters:
+  AriaSetupStackName:
+    Type: String
+    Description: "Name of the main Aria setup stack"
+
+  S3ExportBucketName:
+    Type: String
+    Description: Name of the S3 bucket to export all IdC csv data to
+
+  AriaStateMachineArn:
+    Type: String
+    Description: "ARN of the AriaStateMachine from the Step Functions stack"
+
+  GraphName:
+    Type: String
+    Description: "Name of the Neptune graph"
+    Default: "aria-identitycenter"
+
+  PublicIPAddress:
+    Type: String
+    Description: Provide your public IP address in CIDR format e.g. 1.2.3.4/32
+
+  # Scheduling Parameters for AriaExportGraphStateMachine
+  EnableGraphExportScheduling:
+    Type: String
+    Description: Enable automatic scheduling of the AriaExportGraphStateMachine
+
+  GraphExportScheduleExpression:
+    Type: String
+    Description: "Schedule expression for automatic graph export (e.g., rate(1 day), cron(0 2 * * ? *))"
+
+  GraphExportScheduleDescription:
+    Type: String
+    Description: "Description for the scheduled graph export execution"
+
+  GraphExportScheduleTimezone:
+    Type: String
+    Description: "Timezone for cron-based schedules (e.g., America/New_York, UTC)"
+
+Conditions:
+  ShouldEnableGraphExportScheduling:
+    !Equals [!Ref EnableGraphExportScheduling, "true"]
+
+Resources:
+  # VPC Configuration
+  NeptuneVPC:
+    Type: AWS::EC2::VPC
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W60
+            reason: Not required for this sample deployment but strongly recommended for production implementation
+    Properties:
+      CidrBlock: 172.32.0.0/16
+      EnableDnsHostnames: true
+      EnableDnsSupport: true
+      Tags:
+        - Key: aria
+          Value: vpc
+
+  # Subnets
+  NeptunePrivateSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref NeptuneVPC
+      CidrBlock: 172.32.1.0/24
+      AvailabilityZone: !Select [0, !GetAZs ""]
+      Tags:
+        - Key: aria
+          Value: private-subnet-1
+
+  NeptunePrivateSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref NeptuneVPC
+      CidrBlock: 172.32.2.0/24
+      AvailabilityZone: !Select [1, !GetAZs ""]
+      Tags:
+        - Key: aria
+          Value: private-subnet-2
+
+  # Security Group
+  NeptuneAnalyticsSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: F1000
+            reason: Permitting egress traffic is a requirement of Neptune Analytics
+          - id: W2
+            reason: This is required for Neptune to function as per documentation
+          - id: W60
+            reason: This is an example solution so not required however in a production implementation vpc flow logs should be enabled
+          - id: W9
+            reason: This is required for Neptune to function as per documentation
+    Properties:
+      GroupDescription: Security group for Neptune Analytics VPC endpoint
+      VpcId: !Ref NeptuneVPC
+      SecurityGroupIngress:
+        - Description: Allow ingress from external IP address to Neptune Analytics
+          IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: !Sub ${PublicIPAddress}
+        - Description: Allow ability to pull libraries
+          IpProtocol: tcp
+          FromPort: 8182
+          ToPort: 8182
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: aria
+          Value: neptune-analytics-security-group
+
+  # VPC Endpoints - Neptune Control Plane
+  NeptuneAnalyticsVPCEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      ServiceName: !Sub com.amazonaws.${AWS::Region}.neptune-graph
+      VpcId: !Ref NeptuneVPC
+      VpcEndpointType: Interface
+      SubnetIds:
+        - !Ref NeptunePrivateSubnet1
+        - !Ref NeptunePrivateSubnet2
+      SecurityGroupIds:
+        - !Ref NeptuneAnalyticsSecurityGroup
+      PrivateDnsEnabled: true
+      Tags:
+        - Key: aria
+          Value: neptune-analytics-vpc-graph-endpoint
+
+  # VPC Endpoints - Neptune Data Plane
+  NeptuneAnalyticsVPCDataEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      ServiceName: !Sub com.amazonaws.${AWS::Region}.neptune-graph-data
+      VpcId: !Ref NeptuneVPC
+      VpcEndpointType: Interface
+      SubnetIds:
+        - !Ref NeptunePrivateSubnet1
+        - !Ref NeptunePrivateSubnet2
+      SecurityGroupIds:
+        - !Ref NeptuneAnalyticsSecurityGroup
+      PrivateDnsEnabled: true
+      Tags:
+        - Key: aria
+          Value: neptune-analytics-vpc-graph-data-endpoint
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: "*"
+            Action: "neptune-graph:*"
+            Resource: !Sub "arn:${AWS::Partition}:neptune-graph:${AWS::Region}:${AWS::AccountId}:graph/${CreateNeptuneAnalytics}"
+
+  CreateNeptuneLoadRole: #Role to load data into Neptune analytics
+    Type: "AWS::IAM::Role"
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - neptune-graph.amazonaws.com
+            Action:
+              - "sts:AssumeRole"
+      Description: Role to load data into Neptune analytics
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonS3ReadOnlyAccess
+      Tags:
+        - Key: aria
+          Value: role
+
+  CreateNeptuneAnalytics: #Create Neptune Analytics Graph
+    Type: "AWS::NeptuneGraph::Graph"
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      DeletionProtection: False
+      ProvisionedMemory: 16
+      PublicConnectivity: false
+      ReplicaCount: 0
+      Tags:
+        - Key: "Name"
+          Value: !Ref GraphName
+        - Key: aria
+          Value: analyticsgraph
+
+    # Private Graph Endpoint
+  PrivateGraphEndpoint:
+    Type: AWS::NeptuneGraph::PrivateGraphEndpoint
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      GraphIdentifier: !Ref CreateNeptuneAnalytics
+      VpcId: !Ref NeptuneVPC
+      SubnetIds:
+        - !Ref NeptunePrivateSubnet1
+        - !Ref NeptunePrivateSubnet2
+      SecurityGroupIds:
+        - !Ref NeptuneAnalyticsSecurityGroup
+
+  # AriaExportGraphStateMachine and associated resources
+  AriaExportGraphStateMachine:
+    Type: "AWS::StepFunctions::StateMachine"
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    DependsOn:
+      - AriaExportStateMachineRolePolicy
+    Properties:
+      Definition:
+        Comment: This state machine will export DynamoDB data to CSV in graph format and import data into a Neptune graph
+        StartAt: S3 Export Lambda Function
+        States:
+          S3 Export Lambda Function:
+            Type: Task
+            Resource: arn:aws:states:::lambda:invoke
+            Output: "{% $states.result.Payload %}"
+            Arguments:
+              FunctionName: !Sub "arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:${AriaSetupStackName}-S3Export-function"
+              Payload: { "s3bucket": !Ref S3ExportBucketName }
+            Retry:
+              - ErrorEquals:
+                  - Lambda.ServiceException
+                  - Lambda.AWSLambdaException
+                  - Lambda.SdkClientException
+                  - Lambda.TooManyRequestsException
+                IntervalSeconds: 1
+                MaxAttempts: 3
+                BackoffRate: 2
+                JitterStrategy: FULL
+            Next: Reset Neptune Graph
+          Reset Neptune Graph:
+            Type: Task
+            Arguments:
+              GraphIdentifier: !GetAtt CreateNeptuneAnalytics.GraphId
+              SkipSnapshot: "true"
+            Resource: arn:aws:states:::aws-sdk:neptunegraph:resetGraph
+            Next: Wait
+          Wait:
+            Type: Wait
+            Seconds: 120
+            Next: Start Neptune Import Task
+          Start Neptune Import Task:
+            Type: Task
+            Resource: arn:aws:states:::aws-sdk:neptunegraph:startImportTask
+            Arguments:
+              GraphIdentifier: !GetAtt CreateNeptuneAnalytics.GraphId
+              RoleArn: !GetAtt CreateNeptuneLoadRole.Arn
+              Source: !Sub "s3://${S3ExportBucketName}/"
+              Format: CSV
+            Next: Wait2
+          Wait2:
+            Type: Wait
+            Seconds: 180
+            End: true
+        QueryLanguage: JSONata
+      RoleArn: !GetAtt AriaExportStateMachineRole.Arn
+      StateMachineName: AriaExportGraphStateMachine
+      StateMachineType: STANDARD
+      EncryptionConfiguration:
+        Type: AWS_OWNED_KEY
+      Tags:
+        - Key: aria
+          Value: state
+
+  AriaExportStateMachineRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: states.amazonaws.com
+            Action: sts:AssumeRole
+      MaxSessionDuration: 3600
+      Tags:
+        - Key: aria
+          Value: role
+
+  AriaExportStateMachineRolePolicy:
+    Type: AWS::IAM::RolePolicy
+    Properties:
+      PolicyName: StateMachineNeptuneScopedAccessPolicy
+      RoleName: !Ref AriaExportStateMachineRole
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - neptune-graph:ResetGraph
+              - neptune-graph:StartImportTask
+              - neptune-graph:CreateGraphSnapshot
+            Resource: "*"
+          - Effect: Allow
+            Action:
+              - lambda:InvokeFunction
+            Resource: !Sub "arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:${AriaSetupStackName}-S3Export-function"
+          - Effect: Allow
+            Action:
+              - iam:PassRole
+            Resource: !GetAtt CreateNeptuneLoadRole.Arn
+          - Effect: Allow
+            Action:
+              - s3:ListBucket
+              - s3:GetObject
+              - s3:PutObject
+            Resource:
+              - !Sub "arn:aws:s3:::${S3ExportBucketName}/*"
+              - !Sub "arn:aws:s3:::${S3ExportBucketName}"
+
+  # EventBridge Rule to trigger AriaExportGraphStateMachine after AriaStateMachine completes
+  AriaExportGraphTriggerRole:
+    Type: AWS::IAM::Role
+    Condition: ShouldEnableGraphExportScheduling
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: events.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: AriaExportGraphTriggerPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - states:StartExecution
+                Resource: !GetAtt AriaExportGraphStateMachine.Arn
+      Tags:
+        - Key: aria
+          Value: eventbridge-role
+
+  AriaExportGraphTriggerRule:
+    Type: AWS::Events::Rule
+    Condition: ShouldEnableGraphExportScheduling
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      Name: !Sub "${AWS::StackName}-GraphTrigger"
+      Description: !Sub "Trigger ${AriaSetupStackName} graph export after data collection completes"
+      State: ENABLED
+      EventPattern:
+        source:
+          - aws.states
+        detail-type:
+          - Step Functions Execution Status Change
+        detail:
+          status:
+            - SUCCEEDED
+          stateMachineArn:
+            - !Ref AriaStateMachineArn
+      Targets:
+        - Id: AriaExportGraphTarget
+          Arn: !GetAtt AriaExportGraphStateMachine.Arn
+          RoleArn: !GetAtt AriaExportGraphTriggerRole.Arn
+          RetryPolicy:
+            MaximumRetryAttempts: 2
+          DeadLetterConfig:
+            Arn: !GetAtt AriaExportGraphTriggerDLQ.Arn
+
+  # Optional time-based schedule for independent graph export execution
+  AriaExportGraphScheduleRole:
+    Type: AWS::IAM::Role
+    Condition: ShouldEnableGraphExportScheduling
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: scheduler.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: AriaExportGraphSchedulePolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - states:StartExecution
+                Resource: !GetAtt AriaExportGraphStateMachine.Arn
+      Tags:
+        - Key: aria
+          Value: scheduler-role
+
+  AriaExportGraphSchedule:
+    Type: AWS::Scheduler::Schedule
+    Condition: ShouldEnableGraphExportScheduling
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      Name: !Sub "${AWS::StackName}-Export"
+      Description: !Sub "${GraphExportScheduleDescription} (Independent schedule - also triggers after data collection)"
+      State: ENABLED
+      FlexibleTimeWindow:
+        Mode: "OFF"
+      ScheduleExpression: !Ref GraphExportScheduleExpression
+      ScheduleExpressionTimezone: !Ref GraphExportScheduleTimezone
+      Target:
+        Arn: !GetAtt AriaExportGraphStateMachine.Arn
+        RoleArn: !GetAtt AriaExportGraphScheduleRole.Arn
+        RetryPolicy:
+          MaximumRetryAttempts: 2
+        DeadLetterConfig:
+          Arn: !GetAtt AriaExportGraphScheduleDLQ.Arn
+
+  # Dead Letter Queue for failed EventBridge triggered executions
+  AriaExportGraphTriggerDLQ:
+    Type: AWS::SQS::Queue
+    Condition: ShouldEnableGraphExportScheduling
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W48
+            reason: "Default SQS encryption is sufficient for this dead letter queue"
+      checkov:
+        skip:
+          - id: CKV_AWS_27
+            comment: "Default SQS encryption is sufficient for this dead letter queue"
+    Properties:
+      QueueName: !Sub "${AWS::StackName}-Trigger-DLQ"
+      MessageRetentionPeriod: 1209600 # 14 days
+      Tags:
+        - Key: aria
+          Value: dlq
+
+  # Dead Letter Queue for failed scheduled executions
+  AriaExportGraphScheduleDLQ:
+    Type: AWS::SQS::Queue
+    Condition: ShouldEnableGraphExportScheduling
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W48
+            reason: "Default SQS encryption is sufficient for this dead letter queue"
+      checkov:
+        skip:
+          - id: CKV_AWS_27
+            comment: "Default SQS encryption is sufficient for this dead letter queue"
+    Properties:
+      QueueName: !Sub "${AWS::StackName}-Export-DLQ"
+      MessageRetentionPeriod: 1209600 # 14 days
+      Tags:
+        - Key: aria
+          Value: dlq
+
+  # CloudWatch Log Group for EventBridge rule monitoring
+  AriaExportGraphTriggerLogGroup:
+    Type: AWS::Logs::LogGroup
+    Condition: ShouldEnableGraphExportScheduling
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W84
+            reason: "Default CloudWatch Logs encryption is sufficient for this log group"
+      checkov:
+        skip:
+          - id: CKV_AWS_158
+            comment: "Default CloudWatch Logs encryption is sufficient for this log group"
+    Properties:
+      LogGroupName: !Sub "/aws/events/rule/${AWS::StackName}-GraphTrigger"
+      RetentionInDays: 30
+      Tags:
+        - Key: aria
+          Value: log
+
+  # CloudWatch Log Group for scheduler monitoring
+  AriaExportGraphScheduleLogGroup:
+    Type: AWS::Logs::LogGroup
+    Condition: ShouldEnableGraphExportScheduling
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W84
+            reason: "Default CloudWatch Logs encryption is sufficient for this log group"
+      checkov:
+        skip:
+          - id: CKV_AWS_158
+            comment: "Default CloudWatch Logs encryption is sufficient for this log group"
+    Properties:
+      LogGroupName: !Sub "/aws/scheduler/${AWS::StackName}-Export"
+      RetentionInDays: 30
+      Tags:
+        - Key: aria
+          Value: log
+
+Outputs:
+  NeptuneGraphEndpoint:
+    Value: !GetAtt CreateNeptuneAnalytics.Endpoint
+    Description: "Neptune Graph Endpoint"
+  NeptuneGraphId:
+    Value: !GetAtt CreateNeptuneAnalytics.GraphId
+    Description: "Neptune Graph ID"
+  NeptuneGraphName:
+    Value: !Sub "${GraphName}-${AWS::StackName}"
+    Description: "Neptune Graph Name"
+  NeptuneGraphArn:
+    Value: !GetAtt CreateNeptuneAnalytics.GraphArn
+  CreateNeptuneLoadRole:
+    Value: !GetAtt CreateNeptuneLoadRole.Arn
+  NeptuneVPC:
+    Value: !GetAtt NeptuneVPC.VpcId
+    Export:
+      Name: !Sub "${AWS::StackName}-VPC"
+  NeptunePrivateSubnet1:
+    Value: !GetAtt NeptunePrivateSubnet1.SubnetId
+    Export:
+      Name: !Sub "${AWS::StackName}-PrivateSubnet1"
+  NeptunePrivateSubnet2:
+    Value: !GetAtt NeptunePrivateSubnet2.SubnetId
+    Export:
+      Name: !Sub "${AWS::StackName}-PrivateSubnet2"
+  NeptuneAnalyticsSecurityGroup:
+    Value: !GetAtt NeptuneAnalyticsSecurityGroup.GroupId
+    Export:
+      Name: !Sub "${AWS::StackName}-NeptuneSG"
+  NeptuneAnalyticsVPCEndpoint:
+    Value: !GetAtt NeptuneAnalyticsVPCEndpoint.Id
+    Export:
+      Name: !Sub "${AWS::StackName}-NeptuneVPCEndpoint"
+  NeptuneAnalyticsVPCDataEndpoint:
+    Value: !GetAtt NeptuneAnalyticsVPCDataEndpoint.Id
+    Export:
+      Name: !Sub "${AWS::StackName}-NeptuneVPCDataEndpoint"
+
+  # AriaExportGraphStateMachine Outputs
+  AriaExportGraphStateMachineArn:
+    Description: "ARN of the AriaExportGraphStateMachine"
+    Value: !GetAtt AriaExportGraphStateMachine.Arn
+    Export:
+      Name: !Sub "${AWS::StackName}-ExportStateMachineArn"
+
+  GraphExportSchedulingEnabled:
+    Description: "Whether scheduling is enabled for the AriaExportGraphStateMachine"
+    Value: !Ref EnableGraphExportScheduling
+    Export:
+      Name: !Sub "${AWS::StackName}-ExportSchedulingEnabled"
+
+  GraphExportScheduleExpression:
+    Condition: ShouldEnableGraphExportScheduling
+    Description: "Schedule expression for the AriaExportGraphStateMachine"
+    Value: !Ref GraphExportScheduleExpression
+    Export:
+      Name: !Sub "${AWS::StackName}-ExportScheduleExpression"
+
+  GraphExportScheduleName:
+    Condition: ShouldEnableGraphExportScheduling
+    Description: "Name of the EventBridge Schedule (independent execution)"
+    Value: !Ref AriaExportGraphSchedule
+    Export:
+      Name: !Sub "${AWS::StackName}-ExportScheduleName"
+
+  GraphExportTriggerRuleName:
+    Condition: ShouldEnableGraphExportScheduling
+    Description: "Name of the EventBridge Rule that triggers graph export after data collection"
+    Value: !Ref AriaExportGraphTriggerRule
+    Export:
+      Name: !Sub "${AWS::StackName}-ExportTriggerRuleName"

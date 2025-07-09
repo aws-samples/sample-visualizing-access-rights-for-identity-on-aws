@@ -1,0 +1,136 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'EventBridge rules and related resources for Workforce Identity Visualization'
+
+Parameters:
+  S3SourceBucketName:
+    Type: String
+    Description: Name of the S3 source bucket
+  UpdateFunctionCodeLambdaArn:
+    Type: String
+    Description: ARN of UpdateFunctionCode Lambda function
+  AccessAnalyzerFindingIngestionLambdaArn:
+    Type: String
+    Description: ARN of AccessAnalyzerFindingIngestion Lambda function
+  StackName:
+    Type: String
+    Description: The parent stack name
+
+Resources:
+  # IAM Role for EventBridge to invoke UpdateFunctionCode Lambda
+  InvokeUpdateFunctionCodeEventBridgeInvokeRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: events.amazonaws.com
+            Action: 'sts:AssumeRole'
+            Condition:
+              StringEquals:
+                aws:SourceArn: !Sub 'arn:${AWS::Partition}:events:${AWS::Region}:${AWS::AccountId}:rule/${StackName}-Source-Trigger-UpdateFunctionCode'
+      Policies:
+        - PolicyName: InvokeUpdateFunctionCodeEventBridgeInvokePolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - lambda:InvokeFunction
+                Resource: !Ref UpdateFunctionCodeLambdaArn
+      Tags:
+        - Key: aria
+          Value: role
+
+  # EventBridge rule to invoke UpdateFunctionCode lambda when objects are uploaded to source bucket
+  InvokeUpdateFunctionCodeEventBridgeRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: !Sub '${StackName}-Source-Trigger-UpdateFunctionCode'
+      EventPattern: !Sub '{"source":["aws.s3"],"detail-type":["Object Created"],"detail":{"bucket":{"name":["${S3SourceBucketName}"]}}}'
+      State: ENABLED
+      EventBusName: default
+      Targets:
+        - Id: Id3b1ca365-df10-4d67-a299-1b553942d434
+          Arn: !Ref UpdateFunctionCodeLambdaArn
+          RoleArn: !GetAtt InvokeUpdateFunctionCodeEventBridgeInvokeRole.Arn
+
+  # IAM Role for EventBridge to invoke AccessAnalyzer Lambda
+  AriaAccessAnalyzerFindingIngestionEventBridgeInvokeRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: events.amazonaws.com
+            Action: 'sts:AssumeRole'
+            Condition:
+              StringEquals:
+                aws:SourceArn:
+                  - !Sub 'arn:${AWS::Partition}:events:${AWS::Region}:${AWS::AccountId}:rule/${StackName}-Internal-AA-Trigger-Ingestion'
+                  - !Sub 'arn:${AWS::Partition}:events:${AWS::Region}:${AWS::AccountId}:rule/${StackName}-Unused-AA-Trigger-Ingestion'
+                  - !Sub 'arn:${AWS::Partition}:events:${AWS::Region}:${AWS::AccountId}:rule/${StackName}-External-AA-Trigger-Ingestion'
+      Policies:
+        - PolicyName: AccessAnalyzerFindingIngestionEventBridgeInvokePolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - lambda:InvokeFunction
+                Resource: !Ref AccessAnalyzerFindingIngestionLambdaArn
+      Tags:
+        - Key: aria
+          Value: role
+
+  # EventBridge rules for Access Analyzer findings
+  AriaInternalAAFindingEventBridgeRule:
+    Type: AWS::Events::Rule 
+    Properties:
+      Name: !Sub '${StackName}-Internal-AA-Trigger-Ingestion'
+      EventPattern: >-
+        {"source":["aws.access-analyzer"],"detail-type":["Internal Access
+        Finding"],"detail":{"principal":{"AWS":[{"wildcard":"arn:aws:iam::*:role/aws-reserved/sso.amazonaws.com/AWSReservedSSO_*"}]}}}
+      State: ENABLED
+      EventBusName: default
+      Targets:
+        - Id: Idd97798e1-e511-4494-8c47-3f25568cd5bc
+          Arn: !Ref AccessAnalyzerFindingIngestionLambdaArn
+          RoleArn: !GetAtt AriaAccessAnalyzerFindingIngestionEventBridgeInvokeRole.Arn
+  
+  AriaUnusedAAFindingEventBridgeRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: !Sub '${StackName}-Unused-AA-Trigger-Ingestion'
+      EventPattern: >-
+        {"source":["aws.access-analyzer"],"detail-type":["Unused Access Finding for IAM entities"],"detail.resource":[{"wildcard":"arn:aws:iam::*:role/aws-reserved/sso.amazonaws.com/AWSReservedSSO_*"}]}
+      State: ENABLED
+      EventBusName: default
+      Targets:
+        - Id: Idd97798e1-e511-4494-8c47-3f25568cd5bc
+          Arn: !Ref AccessAnalyzerFindingIngestionLambdaArn
+          RoleArn: !GetAtt AriaAccessAnalyzerFindingIngestionEventBridgeInvokeRole.Arn
+
+  AriaExternalAAFindingEventBridgeRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: !Sub '${StackName}-External-AA-Trigger-Ingestion'
+      EventPattern: >-
+        {"source":["aws.access-analyzer"],"detail-type":["Access Analyzer Finding"]}
+      State: ENABLED
+      EventBusName: default
+      Targets:
+        - Id: Idd97798e1-e511-4494-8c47-3f25568cd5bc
+          Arn: !Ref AccessAnalyzerFindingIngestionLambdaArn
+          RoleArn: !GetAtt AriaAccessAnalyzerFindingIngestionEventBridgeInvokeRole.Arn
+
+Outputs:
+  UpdateFunctionCodeEventBridgeRuleArn:
+    Description: ARN of the UpdateFunctionCode EventBridge rule
+    Value: !GetAtt InvokeUpdateFunctionCodeEventBridgeRule.Arn
+  AccessAnalyzerEventBridgeRoleArn:
+    Description: ARN of the Access Analyzer EventBridge role
+    Value: !GetAtt AriaAccessAnalyzerFindingIngestionEventBridgeInvokeRole.Arn

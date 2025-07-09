@@ -1,0 +1,364 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: "Core infrastructure components - DynamoDB tables and shared resources"
+
+Parameters:
+  StackName:
+    Type: String
+    Description: Name of the parent stack
+
+Resources:
+  # DynamoDB Tables
+  AriaIdCUsersTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W74
+            reason: "Default AWS managed encryption is sufficient for this identity data table"
+          - id: W76
+            reason: "TTL not required for user identity data"
+          - id: W28
+            reason: "Explicit table name required for consistent cross-stack references"
+          - id: W78
+            reason: "Point-in-time recovery not required for this identity data table"
+      checkov:
+        skip:
+          - id: CKV_AWS_119
+            comment: "Default AWS managed encryption is sufficient for this identity data table"
+          - id: CKV_AWS_28
+            comment: "Point-in-time recovery not required for this identity data table"
+    Properties:
+      TableName: AriaIdCUsers
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: UserId
+          AttributeType: S
+      KeySchema:
+        - AttributeName: UserId
+          KeyType: HASH
+      Tags:
+        - Key: aria
+          Value: dynamodb-table
+
+  AriaIdCGroupsTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W74
+            reason: "Default AWS managed encryption is sufficient for this identity data table"
+          - id: W76
+            reason: "TTL not required for group identity data"
+          - id: W28
+            reason: "Explicit table name required for consistent cross-stack references"
+          - id: W78
+            reason: "Point-in-time recovery not required for this identity data table"
+      checkov:
+        skip:
+          - id: CKV_AWS_119
+            comment: "Default AWS managed encryption is sufficient for this identity data table"
+          - id: CKV_AWS_28
+            comment: "Point-in-time recovery not required for this identity data table"
+    Properties:
+      TableName: AriaIdCGroups
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: GroupId
+          AttributeType: S
+      KeySchema:
+        - AttributeName: GroupId
+          KeyType: HASH
+      Tags:
+        - Key: aria
+          Value: dynamodb-table
+
+  AriaIdCGroupMembershipTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W74
+            reason: "Default AWS managed encryption is sufficient for this identity data table"
+          - id: W76
+            reason: "TTL not required for group membership data"
+          - id: W28
+            reason: "Explicit table name required for consistent cross-stack references"
+          - id: W78
+            reason: "Point-in-time recovery not required for this identity data table"
+      checkov:
+        skip:
+          - id: CKV_AWS_119
+            comment: "Default AWS managed encryption is sufficient for this identity data table"
+          - id: CKV_AWS_28
+            comment: "Point-in-time recovery not required for this identity data table"
+    Properties:
+      TableName: AriaIdCGroupMembership
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: MembershipId
+          AttributeType: S
+      KeySchema:
+        - AttributeName: MembershipId
+          KeyType: HASH
+      Tags:
+        - Key: aria
+          Value: dynamodb-table
+
+  AriaIdCPermissionSetsTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W74
+            reason: "Default AWS managed encryption is sufficient for this identity data table"
+          - id: W76
+            reason: "TTL not required for permission set data"
+          - id: W28
+            reason: "Explicit table name required for consistent cross-stack references"
+          - id: W78
+            reason: "Point-in-time recovery not required for this identity data table"
+      checkov:
+        skip:
+          - id: CKV_AWS_119
+            comment: "Default AWS managed encryption is sufficient for this identity data table"
+          - id: CKV_AWS_28
+            comment: "Point-in-time recovery not required for this identity data table"
+    Properties:
+      TableName: AriaIdCPermissionSets
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: PermissionSetArn
+          AttributeType: S
+      KeySchema:
+        - AttributeName: PermissionSetArn
+          KeyType: HASH
+      Tags:
+        - Key: aria
+          Value: dynamodb-table
+
+  AriaIdCProvisionedPermissionSetsTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W74
+            reason: "Default AWS managed encryption is sufficient for this identity data table"
+          - id: W76
+            reason: "TTL not required for provisioned permission set data"
+          - id: W28
+            reason: "Explicit table name required for consistent cross-stack references"
+          - id: W78
+            reason: "Point-in-time recovery not required for this identity data table"
+      checkov:
+        skip:
+          - id: CKV_AWS_119
+            comment: "Default AWS managed encryption is sufficient for this identity data table"
+          - id: CKV_AWS_28
+            comment: "Point-in-time recovery not required for this identity data table"
+    Properties:
+      TableName: AriaIdCProvisionedPermissionSets
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: ProvisionedPermissionSetId
+          AttributeType: S
+      KeySchema:
+        - AttributeName: ProvisionedPermissionSetId
+          KeyType: HASH
+      Tags:
+        - Key: aria
+          Value: dynamodb-table
+
+  AriaIdCAccountsTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W74
+            reason: "Default AWS managed encryption is sufficient for this identity data table"
+          - id: W76
+            reason: "TTL not required for account data"
+          - id: W28
+            reason: "Explicit table name required for consistent cross-stack references"
+          - id: W78
+            reason: "Point-in-time recovery not required for this identity data table"
+      checkov:
+        skip:
+          - id: CKV_AWS_119
+            comment: "Default AWS managed encryption is sufficient for this identity data table"
+          - id: CKV_AWS_28
+            comment: "Point-in-time recovery not required for this identity data table"
+    Properties:
+      TableName: AriaIdCAccounts
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: AccountId
+          AttributeType: S
+      KeySchema:
+        - AttributeName: AccountId
+          KeyType: HASH
+      Tags:
+        - Key: aria
+          Value: dynamodb-table
+
+  AriaIdCUserAccountAssignmentsTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W74
+            reason: "Default AWS managed encryption is sufficient for this identity data table"
+          - id: W76
+            reason: "TTL not required for user account assignment data"
+          - id: W28
+            reason: "Explicit table name required for consistent cross-stack references"
+          - id: W78
+            reason: "Point-in-time recovery not required for this identity data table"
+      checkov:
+        skip:
+          - id: CKV_AWS_119
+            comment: "Default AWS managed encryption is sufficient for this identity data table"
+          - id: CKV_AWS_28
+            comment: "Point-in-time recovery not required for this identity data table"
+    Properties:
+      TableName: AriaIdCUserAccountAssignments
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: AssignmentId
+          AttributeType: S
+      KeySchema:
+        - AttributeName: AssignmentId
+          KeyType: HASH
+      Tags:
+        - Key: aria
+          Value: dynamodb-table
+
+  AriaIdCGroupAccountAssignmentsTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W74
+            reason: "Default AWS managed encryption is sufficient for this identity data table"
+          - id: W76
+            reason: "TTL not required for group account assignment data"
+          - id: W28
+            reason: "Explicit table name required for consistent cross-stack references"
+          - id: W78
+            reason: "Point-in-time recovery not required for this identity data table"
+      checkov:
+        skip:
+          - id: CKV_AWS_119
+            comment: "Default AWS managed encryption is sufficient for this identity data table"
+          - id: CKV_AWS_28
+            comment: "Point-in-time recovery not required for this identity data table"
+    Properties:
+      TableName: AriaIdCGroupAccountAssignments
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: AssignmentId
+          AttributeType: S
+      KeySchema:
+        - AttributeName: AssignmentId
+          KeyType: HASH
+      Tags:
+        - Key: aria
+          Value: dynamodb-table
+
+  AriaIdCIAMRolesTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W74
+            reason: "Default AWS managed encryption is sufficient for this identity data table"
+          - id: W76
+            reason: "TTL not required for IAM role data"
+          - id: W28
+            reason: "Explicit table name required for consistent cross-stack references"
+          - id: W78
+            reason: "Point-in-time recovery not required for this identity data table"
+      checkov:
+        skip:
+          - id: CKV_AWS_119
+            comment: "Default AWS managed encryption is sufficient for this identity data table"
+          - id: CKV_AWS_28
+            comment: "Point-in-time recovery not required for this identity data table"
+    Properties:
+      TableName: AriaIdCIAMRoles
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: RoleArn
+          AttributeType: S
+      KeySchema:
+        - AttributeName: RoleArn
+          KeyType: HASH
+      Tags:
+        - Key: aria
+          Value: dynamodb-table
+
+  AriaIdCAccessAnalyzerFindingsTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W74
+            reason: "Default AWS managed encryption is sufficient for this identity data table"
+          - id: W76
+            reason: "TTL not required for access analyzer findings data"
+          - id: W28
+            reason: "Explicit table name required for consistent cross-stack references"
+          - id: W78
+            reason: "Point-in-time recovery not required for this identity data table"
+      checkov:
+        skip:
+          - id: CKV_AWS_119
+            comment: "Default AWS managed encryption is sufficient for this identity data table"
+          - id: CKV_AWS_28
+            comment: "Point-in-time recovery not required for this identity data table"
+    Properties:
+      TableName: AriaIdCAccessAnalyzerFindings
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: FindingId
+          AttributeType: S
+      KeySchema:
+        - AttributeName: FindingId
+          KeyType: HASH
+      Tags:
+        - Key: aria
+          Value: dynamodb-table
+
+Outputs:
+  UsersTableName:
+    Description: Users DynamoDB table name
+    Value: !Ref AriaIdCUsersTable
+    Export:
+      Name: !Sub "${StackName}-UsersTable"
+
+  GroupsTableName:
+    Description: Groups DynamoDB table name
+    Value: !Ref AriaIdCGroupsTable
+    Export:
+      Name: !Sub "${StackName}-GroupsTable"
+
+  # Add other table exports as needed

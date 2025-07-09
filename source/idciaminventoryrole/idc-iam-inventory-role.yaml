@@ -7,7 +7,7 @@ Parameters:
     Description: AWS Account ID containing the AriaIdCInventoryAccessRole
   IAMRolesLambdaCrossAccountRole:
     Type: String
-    Description: IAM role of Lambda running in other account to assume to perform cross-account operations
+    Description: IAM role ARN of Lambda running in other account to assume to perform cross-account operations
     Default: 'arn:aws:iam::<01234567890>:role/<stack-name>-GetIAMRolesLambdaExecutionRole-<randomchars>'
 
 Resources:

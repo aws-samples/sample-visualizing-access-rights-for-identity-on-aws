@@ -1,0 +1,452 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: "Step Functions state machine for Access Rights for Identity on AWS"
+
+Parameters:
+  CreateTablesLambdaArn:
+    Type: String
+    Description: ARN of CreateTables Lambda function
+  ListUsersLambdaArn:
+    Type: String
+    Description: ARN of ListUsers Lambda function
+  ListGroupsLambdaArn:
+    Type: String
+    Description: ARN of ListGroups Lambda function
+  ListGroupMembershipLambdaArn:
+    Type: String
+    Description: ARN of ListGroupMembership Lambda function
+  ListAccountsLambdaArn:
+    Type: String
+    Description: ARN of ListAccounts Lambda function
+  ListPermissionSetsLambdaArn:
+    Type: String
+    Description: ARN of ListPermissionSets Lambda function
+  ListProvisionedPermissionSetsLambdaArn:
+    Type: String
+    Description: ARN of ListProvisionedPermissionSets Lambda function
+  ListUserAccountAssignmentsLambdaArn:
+    Type: String
+    Description: ARN of ListUserAccountAssignments Lambda function
+  ListGroupAccountAssignmentsLambdaArn:
+    Type: String
+    Description: ARN of ListGroupAccountAssignments Lambda function
+  GetIAMRolesLambdaArn:
+    Type: String
+    Description: ARN of GetIAMRoles Lambda function
+
+  # Scheduling Parameters for AriaStateMachine
+  EnableDataCollectionScheduling:
+    Type: String
+    Description: Enable automatic scheduling of the AriaStateMachine for data collection
+
+  DataCollectionScheduleExpression:
+    Type: String
+    Description: "Schedule expression for automatic data collection (e.g., rate(6 hours), cron(0 */6 * * ? *))"
+
+  DataCollectionScheduleDescription:
+    Type: String
+    Description: "Description for the scheduled data collection execution"
+
+  DataCollectionScheduleTimezone:
+    Type: String
+    Description: "Timezone for cron-based schedules (e.g., America/New_York, UTC)"
+
+Conditions:
+  ShouldEnableDataCollectionScheduling:
+    !Equals [!Ref EnableDataCollectionScheduling, "true"]
+
+Resources:
+  AriaStateMachine:
+    Type: "AWS::StepFunctions::StateMachine"
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    DependsOn:
+      - AriaStateMachineRolePolicy
+    Properties:
+      Definition:
+        Comment: State machine for Aria
+        StartAt: Create DynamoDB Tables
+        States:
+          Create DynamoDB Tables:
+            Type: Task
+            Resource: arn:aws:states:::lambda:invoke
+            Output: "{% $states.result.Payload %}"
+            Arguments:
+              FunctionName: !Ref CreateTablesLambdaArn
+            Retry:
+              - ErrorEquals:
+                  - Lambda.ServiceException
+                  - Lambda.AWSLambdaException
+                  - Lambda.SdkClientException
+                  - Lambda.TooManyRequestsException
+                IntervalSeconds: 1
+                MaxAttempts: 3
+                BackoffRate: 2
+                JitterStrategy: FULL
+            Next: Parallel1
+          Parallel1:
+            Type: Parallel
+            Next: Parallel2
+            Branches:
+              - StartAt: List IdC Users
+                States:
+                  List IdC Users:
+                    Type: Task
+                    Resource: arn:aws:states:::lambda:invoke
+                    Output: "{% $states.result.Payload %}"
+                    Arguments:
+                      FunctionName: !Ref ListUsersLambdaArn
+                    Retry:
+                      - ErrorEquals:
+                          - Lambda.ServiceException
+                          - Lambda.AWSLambdaException
+                          - Lambda.SdkClientException
+                          - Lambda.TooManyRequestsException
+                        IntervalSeconds: 1
+                        MaxAttempts: 3
+                        BackoffRate: 2
+                        JitterStrategy: FULL
+                    End: true
+              - StartAt: List IdC Groups
+                States:
+                  List IdC Groups:
+                    Type: Task
+                    Resource: arn:aws:states:::lambda:invoke
+                    Output: "{% $states.result.Payload %}"
+                    Arguments:
+                      FunctionName: !Ref ListGroupsLambdaArn
+                    Retry:
+                      - ErrorEquals:
+                          - Lambda.ServiceException
+                          - Lambda.AWSLambdaException
+                          - Lambda.SdkClientException
+                          - Lambda.TooManyRequestsException
+                        IntervalSeconds: 1
+                        MaxAttempts: 3
+                        BackoffRate: 2
+                        JitterStrategy: FULL
+                    End: true
+              - StartAt: List IdC Accounts
+                States:
+                  List IdC Accounts:
+                    Type: Task
+                    Resource: arn:aws:states:::lambda:invoke
+                    Output: "{% $states.result.Payload %}"
+                    Arguments:
+                      FunctionName: !Ref ListAccountsLambdaArn
+                    Retry:
+                      - ErrorEquals:
+                          - Lambda.ServiceException
+                          - Lambda.AWSLambdaException
+                          - Lambda.SdkClientException
+                          - Lambda.TooManyRequestsException
+                        IntervalSeconds: 1
+                        MaxAttempts: 3
+                        BackoffRate: 2
+                        JitterStrategy: FULL
+                    End: true
+              - StartAt: List IdC Permission Sets
+                States:
+                  List IdC Permission Sets:
+                    Type: Task
+                    Resource: arn:aws:states:::lambda:invoke
+                    Output: "{% $states.result.Payload %}"
+                    Arguments:
+                      FunctionName: !Ref ListPermissionSetsLambdaArn
+                    Retry:
+                      - ErrorEquals:
+                          - Lambda.ServiceException
+                          - Lambda.AWSLambdaException
+                          - Lambda.SdkClientException
+                          - Lambda.TooManyRequestsException
+                        IntervalSeconds: 1
+                        MaxAttempts: 3
+                        BackoffRate: 2
+                        JitterStrategy: FULL
+                    End: true
+          Parallel2:
+            Type: Parallel
+            Next: List IAM Roles created by IAM Identity Center
+            Branches:
+              - StartAt: List IdC Group Memberships
+                States:
+                  List IdC Group Memberships:
+                    Type: Task
+                    Resource: arn:aws:states:::lambda:invoke
+                    Output: "{% $states.result.Payload %}"
+                    Arguments:
+                      FunctionName: !Ref ListGroupMembershipLambdaArn
+                    Retry:
+                      - ErrorEquals:
+                          - Lambda.ServiceException
+                          - Lambda.AWSLambdaException
+                          - Lambda.SdkClientException
+                          - Lambda.TooManyRequestsException
+                        IntervalSeconds: 1
+                        MaxAttempts: 3
+                        BackoffRate: 2
+                        JitterStrategy: FULL
+                    End: true
+              - StartAt: List IdC Provisioned Permission Sets
+                States:
+                  List IdC Provisioned Permission Sets:
+                    Type: Task
+                    Resource: arn:aws:states:::lambda:invoke
+                    Output: "{% $states.result.Payload %}"
+                    Arguments:
+                      FunctionName: !Ref ListProvisionedPermissionSetsLambdaArn
+                    Retry:
+                      - ErrorEquals:
+                          - Lambda.ServiceException
+                          - Lambda.AWSLambdaException
+                          - Lambda.SdkClientException
+                          - Lambda.TooManyRequestsException
+                        IntervalSeconds: 1
+                        MaxAttempts: 3
+                        BackoffRate: 2
+                        JitterStrategy: FULL
+                    End: true
+              - StartAt: List IdC User Account Assignments
+                States:
+                  List IdC User Account Assignments:
+                    Type: Task
+                    Resource: arn:aws:states:::lambda:invoke
+                    Output: "{% $states.result.Payload %}"
+                    Arguments:
+                      FunctionName: !Ref ListUserAccountAssignmentsLambdaArn
+                    Retry:
+                      - ErrorEquals:
+                          - Lambda.ServiceException
+                          - Lambda.AWSLambdaException
+                          - Lambda.SdkClientException
+                          - Lambda.TooManyRequestsException
+                        IntervalSeconds: 1
+                        MaxAttempts: 3
+                        BackoffRate: 2
+                        JitterStrategy: FULL
+                    End: true
+              - StartAt: List IdC Group Account Assignments
+                States:
+                  List IdC Group Account Assignments:
+                    Type: Task
+                    Resource: arn:aws:states:::lambda:invoke
+                    Output: "{% $states.result.Payload %}"
+                    Arguments:
+                      FunctionName: !Ref ListGroupAccountAssignmentsLambdaArn
+                    Retry:
+                      - ErrorEquals:
+                          - Lambda.ServiceException
+                          - Lambda.AWSLambdaException
+                          - Lambda.SdkClientException
+                          - Lambda.TooManyRequestsException
+                        IntervalSeconds: 1
+                        MaxAttempts: 3
+                        BackoffRate: 2
+                        JitterStrategy: FULL
+                    End: true
+          List IAM Roles created by IAM Identity Center:
+            Type: Task
+            Resource: arn:aws:states:::lambda:invoke
+            Output: "{% $states.result.Payload %}"
+            Arguments:
+              FunctionName: !Ref GetIAMRolesLambdaArn
+            Retry:
+              - ErrorEquals:
+                  - Lambda.ServiceException
+                  - Lambda.AWSLambdaException
+                  - Lambda.SdkClientException
+                  - Lambda.TooManyRequestsException
+                IntervalSeconds: 1
+                MaxAttempts: 3
+                BackoffRate: 2
+                JitterStrategy: FULL
+            End: true
+        QueryLanguage: JSONata
+      RoleArn: !GetAtt AriaStateMachineRole.Arn
+      StateMachineName: AriaStateMachine
+      StateMachineType: STANDARD
+      EncryptionConfiguration:
+        Type: AWS_OWNED_KEY
+
+      Tags:
+        - Key: aria
+          Value: state
+
+  AriaStateMachineRole:
+    Type: AWS::IAM::Role
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: states.amazonaws.com
+            Action: sts:AssumeRole
+      MaxSessionDuration: 3600
+      Tags:
+        - Key: aria
+          Value: role
+
+  AriaStateMachineRolePolicy:
+    Type: AWS::IAM::RolePolicy
+    Properties:
+      PolicyName: StateMachineLambdaInvokeScopedAccessPolicy
+      RoleName: !Ref AriaStateMachineRole
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - lambda:InvokeFunction
+            Resource:
+              - !Ref CreateTablesLambdaArn
+              - !Ref ListUsersLambdaArn
+              - !Ref ListGroupsLambdaArn
+              - !Ref ListGroupMembershipLambdaArn
+              - !Ref ListAccountsLambdaArn
+              - !Ref ListPermissionSetsLambdaArn
+              - !Ref ListProvisionedPermissionSetsLambdaArn
+              - !Ref ListUserAccountAssignmentsLambdaArn
+              - !Ref ListGroupAccountAssignmentsLambdaArn
+              - !Ref GetIAMRolesLambdaArn
+          - Effect: Allow
+            Action:
+              - logs:CreateLogDelivery
+              - logs:GetLogDelivery
+              - logs:UpdateLogDelivery
+              - logs:DeleteLogDelivery
+              - logs:ListLogDeliveries
+              - logs:PutResourcePolicy
+              - logs:DescribeResourcePolicies
+              - logs:DescribeLogGroups
+              - logs:CreateLogGroup
+              - logs:CreateLogStream
+              - logs:PutLogEvents
+              - logs:DescribeLogStreams
+            Resource: "*"
+
+  # EventBridge Scheduler for AriaStateMachine Data Collection
+  AriaDataCollectionScheduleRole:
+    Type: AWS::IAM::Role
+    Condition: ShouldEnableDataCollectionScheduling
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: scheduler.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: AriaDataCollectionSchedulePolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - states:StartExecution
+                Resource: !GetAtt AriaStateMachine.Arn
+      Tags:
+        - Key: aria
+          Value: scheduler-role
+
+  AriaDataCollectionSchedule:
+    Type: AWS::Scheduler::Schedule
+    Condition: ShouldEnableDataCollectionScheduling
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      Name: !Sub "${AWS::StackName}-DataCollection"
+      Description: !Ref DataCollectionScheduleDescription
+      State: ENABLED
+      FlexibleTimeWindow:
+        Mode: "OFF"
+      ScheduleExpression: !Ref DataCollectionScheduleExpression
+      ScheduleExpressionTimezone: !Ref DataCollectionScheduleTimezone
+      Target:
+        Arn: !GetAtt AriaStateMachine.Arn
+        RoleArn: !GetAtt AriaDataCollectionScheduleRole.Arn
+        RetryPolicy:
+          MaximumRetryAttempts: 2
+        DeadLetterConfig:
+          Arn: !GetAtt AriaDataCollectionScheduleDLQ.Arn
+
+  # Dead Letter Queue for failed scheduled data collection executions
+  AriaDataCollectionScheduleDLQ:
+    Type: AWS::SQS::Queue
+    Condition: ShouldEnableDataCollectionScheduling
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W48
+            reason: "Default SQS encryption is sufficient for this dead letter queue"
+      checkov:
+        skip:
+          - id: CKV_AWS_27
+            comment: "Default SQS encryption is sufficient for this dead letter queue"
+    Properties:
+      QueueName: !Sub "${AWS::StackName}-DataCollection-DLQ"
+      MessageRetentionPeriod: 1209600 # 14 days
+      Tags:
+        - Key: aria
+          Value: dlq
+
+  # CloudWatch Log Group for data collection scheduler monitoring
+  AriaDataCollectionScheduleLogGroup:
+    Type: AWS::Logs::LogGroup
+    Condition: ShouldEnableDataCollectionScheduling
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W84
+            reason: "Default CloudWatch Logs encryption is sufficient for this log group"
+      checkov:
+        skip:
+          - id: CKV_AWS_158
+            comment: "Default CloudWatch Logs encryption is sufficient for this scheduler log group"
+    Properties:
+      LogGroupName: !Sub "/aws/scheduler/${AWS::StackName}-DataCollection"
+      RetentionInDays: 30
+      Tags:
+        - Key: aria
+          Value: log
+
+Outputs:
+  StateMachineArn:
+    Description: ARN of the Step Functions state machine
+    Value: !GetAtt AriaStateMachine.Arn
+    Export:
+      Name: !Sub "${AWS::StackName}-StateMachineArn"
+  StateMachineName:
+    Description: Name of the Step Functions state machine
+    Value: !Ref AriaStateMachine
+    Export:
+      Name: !Sub "${AWS::StackName}-StateMachineName"
+
+  # Data Collection Scheduling Outputs
+  DataCollectionSchedulingEnabled:
+    Description: "Whether scheduling is enabled for the AriaStateMachine data collection"
+    Value: !Ref EnableDataCollectionScheduling
+    Export:
+      Name: !Sub "${AWS::StackName}-DataCollectionSchedulingEnabled"
+
+  DataCollectionScheduleExpression:
+    Condition: ShouldEnableDataCollectionScheduling
+    Description: "Schedule expression for the AriaStateMachine data collection"
+    Value: !Ref DataCollectionScheduleExpression
+    Export:
+      Name: !Sub "${AWS::StackName}-DataCollectionScheduleExpression"
+
+  DataCollectionScheduleName:
+    Condition: ShouldEnableDataCollectionScheduling
+    Description: "Name of the EventBridge Schedule for data collection"
+    Value: !Ref AriaDataCollectionSchedule
+    Export:
+      Name: !Sub "${AWS::StackName}-DataCollectionScheduleName"
