@@ -8,6 +8,7 @@ from botocore.exceptions import ClientError
 def parse_internalaccess_finding(event,table_ia):
     # Parse the event detail
     detail = (event['detail'])
+    #print(f"Event detail:{detail}")
 
     delimiter = ", " # Define a delimiter
     
@@ -15,7 +16,7 @@ def parse_internalaccess_finding(event,table_ia):
     finding_id = detail['id']
     finding_type = detail['findingType']
 
-    # print(f"Parsing finding {finding_id} and extracting relevant attributes...")
+    print(f"Parsing Internal Access finding {finding_id} and extracting relevant attributes...")
 
     principal = detail['principal']['AWS']
     principal_type = detail.get('principalType', 'N/A')
@@ -66,16 +67,18 @@ def parse_internalaccess_finding(event,table_ia):
 def parse_unusedaccess_finding(event,table_ua):
     # Parse the event detail
     detail = (event['detail'])
+    #print(f"Event detail:{detail}")
 
     delimiter = ", " # Define a delimiter
     
     # Extract relevant information from the event
-    finding_id = detail['findingId']
+    finding_id = detail['id']
     finding_type = detail['findingType']
+
+    print(f"Parsing Unused Access Analyzer finding {finding_id} and extracting relevant attributes...")
+
     num_unused_services = detail['numberOfUnusedServices']
     num_unused_actions = detail['numberOfUnusedActions']
-
-    # print(f"Parsing unused finding {finding_id} and extracting relevant attributes...")
 
     principal = detail['resource']
     principal_name = extract_role_name(principal)
@@ -117,6 +120,7 @@ def parse_unusedaccess_finding(event,table_ua):
     table_ua.put_item(Item=item)
 
 def delete_item_by_finding_id(finding_id, table_name):
+    print(f"Item with FindingId {finding_id} to be deleted...")
     try:
         response = table_name.delete_item(
             Key={
@@ -146,27 +150,46 @@ def lambda_handler(event, context):
     table_ia = dynamodb.Table('AriaIdCInternalAAFindings')
     table_ua = dynamodb.Table('AriaIdCUnusedAAFindings')
     table_ea = dynamodb.Table('AriaIdCExternalAAFindings')
-    
-    try:    
-        if (event['detail']['findingType'] == 'InternalAccess'):
-            if (event['detail']['status'] == 'RESOLVED'):
-                delete_item_by_finding_id(event['detail']['id'], table_ia)
-            else:
-                parse_internalaccess_finding(event, table_ia)
-        
-        if (event['detail']['findingType'] == 'UnusedPermission' or 'UnusedIAMRole'):
-            if (event['detail']['status'] == 'ARCHIVED'):
-                delete_item_by_finding_id(event['detail']['findingId'], table_ua)
-            else:
-                parse_unusedaccess_finding(event, table_ua)
 
-        # print(f"Successfully added finding {finding_id} to DynamoDB")
+    finding_id = event['detail']['id']
+    finding_type = event['detail']['findingType']
+    
+    try:
+        match finding_type:
+            case 'InternalAccess':
+                print("Finding type is Internal Access...")
+                if (event['detail']['status'] == 'RESOLVED'):
+                    print("Deleting Internal Access Analyzer Finding...")
+                    delete_item_by_finding_id(finding_id, table_ia)
+                else:
+                    print("Parsing Internal Access Analyzer Finding...")
+                    parse_internalaccess_finding(event, table_ia)
+            case 'UnusedPermission':
+                print("Finding type is Unused Access - Unused Permission...")
+                if (event['detail']['status'] == 'RESOLVED'):
+                    print("Deleting Unused Access Analyzer Finding...")
+                    delete_item_by_finding_id(finding_id, table_ua)
+                else:
+                    print("Parsing Unused Access Analyzer Finding...")
+                    parse_unusedaccess_finding(event, table_ua)
+            case 'UnusedIAMRole':
+                print("Finding type is Unused Access - Unused IAM Role...")
+                if (event['detail']['status'] == 'RESOLVED'):
+                    print("Deleting Unused Access Analyzer Finding...")
+                    delete_item_by_finding_id(finding_id, table_ua)
+                else:
+                    print("Parsing Unused Access Analyzer Finding...")
+                    parse_unusedaccess_finding(event, table_ua)
+
+        print(f"Successfully processed finding {finding_id}")
         return {
             'statusCode': 200,
-            'body': json.dumps('Finding added successfully')
+            'body': json.dumps('Finding processed OK')
         }
     except Exception as e:
-        print(f"Error processing finding: {str(e)}")
+        detail = (event['detail'])
+        #print(f"Error processing event detail:{detail}")
+        print(f"Error processing finding: {finding_id}")
         return {
             'statusCode': 500,
             'body': json.dumps('Error processing finding')
