@@ -1,5 +1,5 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: 'Main CloudFormation template for Workforce Identity Visualization - orchestrates nested stacks'
+Description: 'Main CloudFormation template for Workforce Identity Visualization - orchestrates nested stacks (uksb-zilgml23n9)'
 
 Parameters:
   S3SourceBucketName:
