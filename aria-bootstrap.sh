@@ -17,7 +17,7 @@ ACCOUNTIDSHORT=$(echo "$ACCOUNTID" | cut -c 9-12)
 RANDOMSTRING="$(mktemp -u XXXXXXXX | tr 'A-Z' 'a-z')"
 
 # Check SSM parameter store to see if the source bucket name has already been generated
-SOURCE_BUCKET=$(aws ssm get-parameter --name "aria-source-bucket" --region "$REGION" --query "Parameter.Value" --output text)
+SOURCE_BUCKET=$(aws ssm get-parameter --name "aria-source-bucket" --region "$REGION" --query "Parameter.Value" --output text 2>/dev/null)
 
 # Check if the parameter store value exists, if not then set the variable (will be stored in SSM parameter store later)
 if [ -z "$SOURCE_BUCKET" ]; then
@@ -35,7 +35,7 @@ if [ ! -d "$SOURCE_DIR" ]; then
 fi
 
 # Check SSM parameter store to see if the export bucket name has already been generated
-EXPORT_BUCKET=$(aws ssm get-parameter --name "aria-export-bucket" --region "$REGION" --query "Parameter.Value" --output text)
+EXPORT_BUCKET=$(aws ssm get-parameter --name "aria-export-bucket" --region "$REGION" --query "Parameter.Value" --output text 2>/dev/null)
 
 # Check if the parameter store value exists, if not then set the variable (will be stored in SSM parameter store later)
 if [ -z "$EXPORT_BUCKET" ]; then
@@ -46,30 +46,30 @@ fi
 echo "Aria Source Bucket is : $SOURCE_BUCKET"
 
 # Check if aria SOURCE_BUCKET exists - create if missing, add configure bucket for EventBridge notifications
-if aws s3api head-bucket --bucket "$SOURCE_BUCKET" 2>/dev/null; then
+if aws s3api head-bucket --bucket "$SOURCE_BUCKET" > /dev/null 2>&1; then
     echo "Source Bucket does not exist...creating..."
     aws s3api create-bucket \
         --bucket "$SOURCE_BUCKET" \
         --region "$REGION" \
-        $(if [ "$REGION" != "us-east-1" ]; then echo "--create-bucket-configuration LocationConstraint=$REGION"; fi)
+        $(if [ "$REGION" != "us-east-1" ]; then echo "--create-bucket-configuration LocationConstraint=$REGION"; fi) > /dev/null 2>&1
 fi
 
 # Configure EventBridge notifications (done once regardless of bucket existence)
 aws s3api put-bucket-notification-configuration \
     --bucket "$SOURCE_BUCKET" \
-    --notification-configuration '{"EventBridgeConfiguration": {}}'
+    --notification-configuration '{"EventBridgeConfiguration": {}}' > /dev/null 2>&1
 
 echo "Aria Export Bucket is : $EXPORT_BUCKET"
 
 # Check if aria EXPORT_BUCKET exists
-if aws s3api head-bucket --bucket "$EXPORT_BUCKET" 2>/dev/null; then
+if aws s3api head-bucket --bucket "$EXPORT_BUCKET" > /dev/null 2>&1; then
     echo "Export Bucket already exists"
 else
     echo "Export Bucket does not exist...creating..."
     aws s3api create-bucket \
         --bucket "$EXPORT_BUCKET" \
         --region "$REGION" \
-        $(if [ "$REGION" != "us-east-1" ]; then echo "--create-bucket-configuration LocationConstraint=$REGION"; fi)
+        $(if [ "$REGION" != "us-east-1" ]; then echo "--create-bucket-configuration LocationConstraint=$REGION"; fi) > /dev/null 2>&1
 fi
 # Create Lambda function zip files
 echo "Creating directories and zip files..."
@@ -105,8 +105,8 @@ echo "Zip files created successfully!"
 
 # Copy files to SOURCE_BUCKET
 echo "Uploading zip files to S3 bucket: $SOURCE_BUCKET"
-aws s3 rm "s3://$SOURCE_BUCKET/" --recursive
-aws s3 cp "$SOURCE_DIR" "s3://$SOURCE_BUCKET/" --recursive --exclude "*" --include "*.zip"
+aws s3 rm "s3://$SOURCE_BUCKET/" --recursive 2>/dev/null
+aws s3 cp "$SOURCE_DIR" "s3://$SOURCE_BUCKET/" --recursive --exclude "*" --include "*.zip" 2>/dev/null
 
 # Delete files from zip bucket
 echo "Cleaning up..."

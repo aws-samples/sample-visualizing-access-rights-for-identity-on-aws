@@ -36,6 +36,9 @@ Parameters:
     Type: String
   StackName:
     Type: String
+  ManagementAccountId:
+    Type: String
+    Description: AWS Account ID of the Organizations management account (for KMS key access)
 
 Resources:
   # CreateTables Lambda
@@ -81,6 +84,8 @@ Resources:
       Tags:
         - Key: aria
           Value: role
+        - Key: auto-delete
+          Value: "no"
 
   CreateTablesFunction:
     Type: "AWS::Lambda::Function"
@@ -121,6 +126,8 @@ Resources:
       Tags:
         - Key: aria
           Value: lambda
+        - Key: auto-delete
+          Value: "no"
 
   CreateTablesLogGroup:
     Type: "AWS::Logs::LogGroup"
@@ -141,6 +148,8 @@ Resources:
       Tags:
         - Key: aria
           Value: log
+        - Key: auto-delete
+          Value: "no"
 
   # ListUsers Lambda
   ListUsersRole:
@@ -188,9 +197,21 @@ Resources:
                   - "identitystore:ListUsers"
                   - "sso:ListInstances"
                 Resource: "*"
+              - Effect: Allow
+                Action:
+                  - "kms:DescribeKey"
+                  - "kms:Decrypt"
+                Resource: !Sub arn:aws:kms:${AWS::Region}:${ManagementAccountId}:key/*
+                Condition:
+                  StringEquals:
+                    kms:ViaService:
+                      - !Sub sso.${AWS::Region}.amazonaws.com
+                      - !Sub identitystore.${AWS::Region}.amazonaws.com
       Tags:
         - Key: aria
           Value: role
+        - Key: auto-delete
+          Value: "no"
 
   ListUsersFunction:
     Type: "AWS::Lambda::Function"
@@ -231,6 +252,8 @@ Resources:
       Tags:
         - Key: aria
           Value: function
+        - Key: auto-delete
+          Value: "no"
 
   ListUsersLogGroup:
     Type: "AWS::Logs::LogGroup"
@@ -251,6 +274,8 @@ Resources:
       Tags:
         - Key: aria
           Value: log
+        - Key: auto-delete
+          Value: "no"
 
   # ListGroups Lambda
   ListGroupsRole:
@@ -298,9 +323,21 @@ Resources:
                   - "identitystore:ListGroups"
                   - "sso:ListInstances"
                 Resource: "*"
+              - Effect: Allow
+                Action:
+                  - "kms:DescribeKey"
+                  - "kms:Decrypt"
+                Resource: !Sub arn:aws:kms:${AWS::Region}:${ManagementAccountId}:key/*
+                Condition:
+                  StringEquals:
+                    kms:ViaService:
+                      - !Sub sso.${AWS::Region}.amazonaws.com
+                      - !Sub identitystore.${AWS::Region}.amazonaws.com
       Tags:
         - Key: aria
           Value: role
+        - Key: auto-delete
+          Value: "no"
 
   ListGroupsFunction:
     Type: "AWS::Lambda::Function"
@@ -341,6 +378,8 @@ Resources:
       Tags:
         - Key: aria
           Value: function
+        - Key: auto-delete
+          Value: "no"
 
   ListGroupsLogGroup:
     Type: "AWS::Logs::LogGroup"
@@ -361,6 +400,8 @@ Resources:
       Tags:
         - Key: aria
           Value: log
+        - Key: auto-delete
+          Value: "no"
 
   # ListGroupMembership Lambda
   ListGroupMembershipRole:
@@ -412,9 +453,21 @@ Resources:
                   - "identitystore:ListGroupMemberships"
                   - "sso:ListInstances"
                 Resource: "*"
+              - Effect: Allow
+                Action:
+                  - "kms:DescribeKey"
+                  - "kms:Decrypt"
+                Resource: !Sub arn:aws:kms:${AWS::Region}:${ManagementAccountId}:key/*
+                Condition:
+                  StringEquals:
+                    kms:ViaService:
+                      - !Sub sso.${AWS::Region}.amazonaws.com
+                      - !Sub identitystore.${AWS::Region}.amazonaws.com
       Tags:
         - Key: aria
           Value: role
+        - Key: auto-delete
+          Value: "no"
 
   ListGroupMembershipFunction:
     Type: "AWS::Lambda::Function"
@@ -455,6 +508,8 @@ Resources:
       Tags:
         - Key: aria
           Value: function
+        - Key: auto-delete
+          Value: "no"
 
   ListGroupMembershipLogGroup:
     Type: "AWS::Logs::LogGroup"
@@ -475,6 +530,8 @@ Resources:
       Tags:
         - Key: aria
           Value: log
+        - Key: auto-delete
+          Value: "no"
 
   # ListPermissionSets Lambda
   ListPermissionSetsRole:
@@ -524,9 +581,21 @@ Resources:
                   - "sso:ListPermissionSets"
                   - "sso:DescribePermissionSet"
                 Resource: "*"
+              - Effect: Allow
+                Action:
+                  - "kms:DescribeKey"
+                  - "kms:Decrypt"
+                Resource: !Sub arn:aws:kms:${AWS::Region}:${ManagementAccountId}:key/*
+                Condition:
+                  StringEquals:
+                    kms:ViaService:
+                      - !Sub sso.${AWS::Region}.amazonaws.com
+                      - !Sub identitystore.${AWS::Region}.amazonaws.com
       Tags:
         - Key: aria
           Value: role
+        - Key: auto-delete
+          Value: "no"
 
   ListPermissionSetsFunction:
     Type: "AWS::Lambda::Function"
@@ -567,6 +636,8 @@ Resources:
       Tags:
         - Key: aria
           Value: function
+        - Key: auto-delete
+          Value: "no"
 
   ListPermissionSetsLogGroup:
     Type: "AWS::Logs::LogGroup"
@@ -587,6 +658,8 @@ Resources:
       Tags:
         - Key: aria
           Value: log
+        - Key: auto-delete
+          Value: "no"
 
   # ListProvisionedPermissionSets Lambda
   ListProvisionedPermissionSetsRole:
@@ -646,9 +719,19 @@ Resources:
                 Resource:
                   - !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/AriaIdCAccounts"
                   - !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/AriaIdCPermissionSets"
+              - Effect: Allow
+                Action:
+                  - "kms:DescribeKey"
+                  - "kms:Decrypt"
+                Resource: !Sub arn:aws:kms:${AWS::Region}:${ManagementAccountId}:key/*
+                Condition:
+                  StringEquals:
+                    kms:ViaService: !Sub sso.${AWS::Region}.amazonaws.com
       Tags:
         - Key: aria
           Value: role
+        - Key: auto-delete
+          Value: "no"
 
   ListProvisionedPermissionSetsFunction:
     Type: "AWS::Lambda::Function"
@@ -689,6 +772,8 @@ Resources:
       Tags:
         - Key: aria
           Value: function
+        - Key: auto-delete
+          Value: "no"
 
   ListProvisionedPermissionSetsLogGroup:
     Type: "AWS::Logs::LogGroup"
@@ -709,6 +794,8 @@ Resources:
       Tags:
         - Key: aria
           Value: log
+        - Key: auto-delete
+          Value: "no"
 
   # ListAccounts Lambda
   ListAccountsRole:
@@ -758,6 +845,8 @@ Resources:
       Tags:
         - Key: aria
           Value: role
+        - Key: auto-delete
+          Value: "no"
 
   ListAccountsFunction:
     Type: "AWS::Lambda::Function"
@@ -798,6 +887,8 @@ Resources:
       Tags:
         - Key: aria
           Value: function
+        - Key: auto-delete
+          Value: "no"
 
   ListAccountsLogGroup:
     Type: "AWS::Logs::LogGroup"
@@ -818,6 +909,8 @@ Resources:
       Tags:
         - Key: aria
           Value: log
+        - Key: auto-delete
+          Value: "no"
 
   # ListUserAccountAssignments Lambda
   ListUserAccountAssignmentsRole:
@@ -876,9 +969,19 @@ Resources:
                   - "organizations:ListAccounts"
                   - "organizations:DescribeOrganization"
                 Resource: "*"
+              - Effect: Allow
+                Action:
+                  - "kms:DescribeKey"
+                  - "kms:Decrypt"
+                Resource: !Sub arn:aws:kms:${AWS::Region}:${ManagementAccountId}:key/*
+                Condition:
+                  StringEquals:
+                    kms:ViaService: !Sub sso.${AWS::Region}.amazonaws.com
       Tags:
         - Key: aria
           Value: role
+        - Key: auto-delete
+          Value: "no"
 
   ListUserAccountAssignmentsFunction:
     Type: "AWS::Lambda::Function"
@@ -919,6 +1022,8 @@ Resources:
       Tags:
         - Key: aria
           Value: function
+        - Key: auto-delete
+          Value: "no"
 
   ListUserAccountAssignmentsLogGroup:
     Type: "AWS::Logs::LogGroup"
@@ -926,7 +1031,7 @@ Resources:
     UpdateReplacePolicy: Delete
     Metadata:
       cfn_nag:
-        rules_to_suppress:  
+        rules_to_suppress:
           - id: W84
             reason: "Default CloudWatch Logs encryption is sufficient for this log group"
       checkov:
@@ -939,6 +1044,8 @@ Resources:
       Tags:
         - Key: aria
           Value: log
+        - Key: auto-delete
+          Value: "no"
 
   # ListGroupAccountAssignments Lambda
   ListGroupAccountAssignmentsRole:
@@ -1001,9 +1108,19 @@ Resources:
                   - "organizations:ListAccounts"
                   - "organizations:DescribeOrganization"
                 Resource: "*"
+              - Effect: Allow
+                Action:
+                  - "kms:DescribeKey"
+                  - "kms:Decrypt"
+                Resource: !Sub arn:aws:kms:${AWS::Region}:${ManagementAccountId}:key/*
+                Condition:
+                  StringEquals:
+                    kms:ViaService: !Sub sso.${AWS::Region}.amazonaws.com
       Tags:
         - Key: aria
           Value: role
+        - Key: auto-delete
+          Value: "no"
 
   ListGroupAccountAssignmentsFunction:
     Type: "AWS::Lambda::Function"
@@ -1044,6 +1161,8 @@ Resources:
       Tags:
         - Key: aria
           Value: function
+        - Key: auto-delete
+          Value: "no"
 
   ListGroupAccountAssignmentsLogGroup:
     Type: "AWS::Logs::LogGroup"
@@ -1064,6 +1183,8 @@ Resources:
       Tags:
         - Key: aria
           Value: log
+        - Key: auto-delete
+          Value: "no"
 
   # GetIAMRoles Lambda Execution Role
   GetIAMRolesExecutionRole:
@@ -1122,6 +1243,8 @@ Resources:
       Tags:
         - Key: aria
           Value: role
+        - Key: auto-delete
+          Value: "no"
 
   GetIAMRolesFunction:
     Type: "AWS::Lambda::Function"
@@ -1162,6 +1285,8 @@ Resources:
       Tags:
         - Key: aria
           Value: function
+        - Key: auto-delete
+          Value: "no"
 
   GetIAMRolesLogGroup:
     Type: "AWS::Logs::LogGroup"
@@ -1182,6 +1307,8 @@ Resources:
       Tags:
         - Key: aria
           Value: log
+        - Key: auto-delete
+          Value: "no"
 
   # S3Export Lambda
   S3ExportRole:
@@ -1224,6 +1351,8 @@ Resources:
       Tags:
         - Key: aria
           Value: role
+        - Key: auto-delete
+          Value: "no"
 
   S3ExportFunction:
     Type: "AWS::Lambda::Function"
@@ -1264,6 +1393,8 @@ Resources:
       Tags:
         - Key: aria
           Value: function
+        - Key: auto-delete
+          Value: "no"
 
   S3ExportLogGroup:
     Type: "AWS::Logs::LogGroup"
@@ -1284,6 +1415,8 @@ Resources:
       Tags:
         - Key: aria
           Value: log
+        - Key: auto-delete
+          Value: "no"
 
   # AccessAnalyzerFindingIngestion Lambda
   AccessAnalyzerFindingIngestionRole:
@@ -1334,6 +1467,8 @@ Resources:
       Tags:
         - Key: aria
           Value: role
+        - Key: auto-delete
+          Value: "no"
 
   AccessAnalyzerFindingIngestionFunction:
     Type: "AWS::Lambda::Function"
@@ -1374,6 +1509,8 @@ Resources:
       Tags:
         - Key: aria
           Value: function
+        - Key: auto-delete
+          Value: "no"
 
   AccessAnalyzerFindingIngestionLogGroup:
     Type: "AWS::Logs::LogGroup"
@@ -1394,6 +1531,8 @@ Resources:
       Tags:
         - Key: aria
           Value: log
+        - Key: auto-delete
+          Value: "no"
 
   # UpdateFunctionCode Lambda
   UpdateFunctionCodeRole:
@@ -1434,6 +1573,8 @@ Resources:
       Tags:
         - Key: aria
           Value: role
+        - Key: auto-delete
+          Value: "no"
 
   UpdateFunctionCodeFunction:
     Type: "AWS::Lambda::Function"
@@ -1474,6 +1615,8 @@ Resources:
       Tags:
         - Key: aria
           Value: function
+        - Key: auto-delete
+          Value: "no"
 
   UpdateFunctionCodeLogGroup:
     Type: "AWS::Logs::LogGroup"
@@ -1494,6 +1637,8 @@ Resources:
       Tags:
         - Key: aria
           Value: log
+        - Key: auto-delete
+          Value: "no"
 
 Outputs:
   CreateTablesLambdaArn:

@@ -129,6 +129,10 @@ def create_tables(dynamodb):
                     {
                         'Key': 'aria',
                         'Value': 'data'
+                    },
+                    {
+                        'Key': 'auto-delete',
+                        'Value': 'no'
                     }
                 ]
             )
