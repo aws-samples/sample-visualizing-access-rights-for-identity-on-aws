@@ -131,11 +131,66 @@ Parameters:
 
   DeployNeptune:
     Type: String
-    Description: Whether to deploy Neptune Analytics and Notebook
+    Description: Whether to deploy the Neptune Analytics graph
     Default: "true"
     AllowedValues:
       - "true"
       - "false"
+
+  DeployNeptuneNotebook:
+    Type: String
+    Description: >-
+      Whether to deploy the Neptune (SageMaker) notebook and Graph Explorer.
+      Requires DeployNeptune=true.
+    Default: "true"
+    AllowedValues:
+      - "true"
+      - "false"
+
+  # MCP Server (AgentCore) Parameters
+  DeployMcpServer:
+    Type: String
+    Description: >-
+      Whether to host the ARIA-gv MCP server on Bedrock AgentCore Runtime.
+      Requires DeployNeptune=true and a pre-built image (McpContainerImageUri).
+    Default: "false"
+    AllowedValues:
+      - "true"
+      - "false"
+
+  McpContainerImageUri:
+    Type: String
+    Description: >-
+      ECR image URI (with tag) of the ARM64 MCP server image. Build it first
+      with mcp-server/build-and-push.sh. Required when DeployMcpServer=true.
+    Default: ""
+
+  McpAgentRuntimeName:
+    Type: String
+    Description: "Name for the AgentCore Runtime (letters, numbers, underscores only)"
+    Default: "aria_gv_mcp"
+    AllowedPattern: "^[a-zA-Z][a-zA-Z0-9_]{0,47}$"
+
+  McpRuntimeSubnet1AzId:
+    Type: String
+    Description: >-
+      AZ ID for the first MCP runtime subnet. Must be an AgentCore-supported AZ.
+      Default is for us-east-1; override for other regions.
+    Default: "use1-az1"
+
+  McpRuntimeSubnet2AzId:
+    Type: String
+    Description: >-
+      AZ ID for the second MCP runtime subnet. Must be an AgentCore-supported AZ.
+      Default is for us-east-1; override for other regions.
+    Default: "use1-az2"
+
+  McpAccessTokenValidityHours:
+    Type: Number
+    Description: "Cognito access token lifetime in hours for the MCP M2M client (1-24)"
+    Default: 12
+    MinValue: 1
+    MaxValue: 24
 
   # Scheduling Parameters
   EnableScheduling:
@@ -191,9 +246,15 @@ Parameters:
 
 Conditions:
   ShouldDeployNeptune: !Equals [!Ref DeployNeptune, "true"]
+  ShouldDeployNeptuneNotebook: !And
+    - !Equals [!Ref DeployNeptune, "true"]
+    - !Equals [!Ref DeployNeptuneNotebook, "true"]
   ShouldDeployNeptuneWithScheduling: !And
     - !Equals [!Ref DeployNeptune, "true"]
     - !Equals [!Ref EnableScheduling, "true"]
+  ShouldDeployMcpServer: !And
+    - !Equals [!Ref DeployNeptune, "true"]
+    - !Equals [!Ref DeployMcpServer, "true"]
 
 Metadata:
   AWS::CloudFormation::Interface:
@@ -233,8 +294,18 @@ Metadata:
       - Label:
           default: "Neptune Notebook"
         Parameters:
+          - DeployNeptuneNotebook
           - NotebookInstanceType
           - NotebookName
+      - Label:
+          default: "MCP Server (AgentCore)"
+        Parameters:
+          - DeployMcpServer
+          - McpContainerImageUri
+          - McpAgentRuntimeName
+          - McpRuntimeSubnet1AzId
+          - McpRuntimeSubnet2AzId
+          - McpAccessTokenValidityHours
       - Label:
           default: "Graph Export Scheduling"
         Parameters:
@@ -396,7 +467,7 @@ Resources:
   # Neptune Notebook Stack
   NeptuneNotebookStack:
     Type: AWS::CloudFormation::Stack
-    Condition: ShouldDeployNeptune
+    Condition: ShouldDeployNeptuneNotebook
     DeletionPolicy: Delete
     UpdateReplacePolicy: Delete
     Properties:
@@ -411,6 +482,30 @@ Resources:
         NeptuneGraphEndpoint: !GetAtt NeptuneAnalyticsStack.Outputs.NeptuneGraphEndpoint
         NeptuneGraphId: !GetAtt NeptuneAnalyticsStack.Outputs.NeptuneGraphId
         NeptuneGraphName: !GetAtt NeptuneAnalyticsStack.Outputs.NeptuneGraphName
+      Tags:
+        - Key: aria
+          Value: nested-stack
+        - Key: auto-delete
+          Value: "no"
+
+  # AgentCore MCP Server Stack (hosts the ARIA-gv MCP server)
+  AgentCoreMcpStack:
+    Type: AWS::CloudFormation::Stack
+    Condition: ShouldDeployMcpServer
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      TemplateURL: !Sub "https://${TemplatesBucketName}.s3.${AWS::Region}.amazonaws.com/agentcore-mcp.yaml"
+      Parameters:
+        ContainerImageUri: !Ref McpContainerImageUri
+        AgentRuntimeName: !Ref McpAgentRuntimeName
+        NeptuneVPC: !GetAtt NeptuneAnalyticsStack.Outputs.NeptuneVPC
+        RuntimeSubnet1AzId: !Ref McpRuntimeSubnet1AzId
+        RuntimeSubnet2AzId: !Ref McpRuntimeSubnet2AzId
+        NeptuneAnalyticsSecurityGroup: !GetAtt NeptuneAnalyticsStack.Outputs.NeptuneAnalyticsSecurityGroup
+        NeptuneGraphId: !GetAtt NeptuneAnalyticsStack.Outputs.NeptuneGraphId
+        NeptuneGraphArn: !GetAtt NeptuneAnalyticsStack.Outputs.NeptuneGraphArn
+        AccessTokenValidityHours: !Ref McpAccessTokenValidityHours
       Tags:
         - Key: aria
           Value: nested-stack
@@ -453,9 +548,31 @@ Outputs:
     Description: "Neptune Analytics Graph ID"
     Value: !GetAtt NeptuneAnalyticsStack.Outputs.NeptuneGraphId
   NeptuneNotebookURL:
-    Condition: ShouldDeployNeptune
+    Condition: ShouldDeployNeptuneNotebook
     Description: "Neptune Analytics Notebook URL"
     Value: !GetAtt NeptuneNotebookStack.Outputs.NeptuneAnalyticsSagemakerNotebook
+
+  # MCP Server (AgentCore) Outputs
+  McpRuntimeArn:
+    Condition: ShouldDeployMcpServer
+    Description: "ARN of the AgentCore Runtime hosting the ARIA-gv MCP server"
+    Value: !GetAtt AgentCoreMcpStack.Outputs.McpRuntimeArn
+  McpCognitoUserPoolId:
+    Condition: ShouldDeployMcpServer
+    Description: "Cognito user pool id for MCP inbound JWT auth"
+    Value: !GetAtt AgentCoreMcpStack.Outputs.CognitoUserPoolId
+  McpCognitoAppClientId:
+    Condition: ShouldDeployMcpServer
+    Description: "Cognito app client id (client_credentials grant)"
+    Value: !GetAtt AgentCoreMcpStack.Outputs.CognitoAppClientId
+  McpCognitoTokenEndpoint:
+    Condition: ShouldDeployMcpServer
+    Description: "OAuth2 token endpoint for obtaining a bearer token"
+    Value: !GetAtt AgentCoreMcpStack.Outputs.CognitoTokenEndpoint
+  McpScope:
+    Condition: ShouldDeployMcpServer
+    Description: "OAuth scope to request in the client_credentials grant"
+    Value: !GetAtt AgentCoreMcpStack.Outputs.McpScope
 
   # Graph Export Scheduling Outputs (only available when Neptune is deployed and scheduling is enabled)
   AriaExportGraphStateMachineArn:

@@ -42,6 +42,37 @@ Parameters:
 
 Resources:
   # CreateTables Lambda
+  CreateTablesManagedPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - "s3:GetObject"
+            Resource: !Sub "arn:aws:s3:::${S3SourceBucketName}/${CreateTablesS3Key}"
+          - Effect: Allow
+            Action:
+              - "logs:CreateLogGroup"
+              - "logs:CreateLogStream"
+              - "logs:PutLogEvents"
+            Resource: !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/${StackName}-CreateTables-function:*"
+          - Effect: Allow
+            Action:
+              - "dynamodb:CreateTable"
+              - "dynamodb:DeleteTable"
+              - "dynamodb:UpdateTable"
+              - "dynamodb:DescribeTable"
+              - "dynamodb:ListTables"
+              - "dynamodb:DescribeLimits"
+              - "dynamodb:UpdateTimeToLive"
+              - "dynamodb:DescribeTimeToLive"
+              - "dynamodb:TagResource"
+            Resource: !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/AriaIdC*"
+
   CreateTablesRole:
     Type: AWS::IAM::Role
     DeletionPolicy: Delete
@@ -54,33 +85,8 @@ Resources:
             Principal:
               Service: lambda.amazonaws.com
             Action: "sts:AssumeRole"
-      Policies:
-        - PolicyName: CreateTablesPolicy
-          PolicyDocument:
-            Version: "2012-10-17"
-            Statement:
-              - Effect: Allow
-                Action:
-                  - "s3:GetObject"
-                Resource: !Sub "arn:aws:s3:::${S3SourceBucketName}/${CreateTablesS3Key}"
-              - Effect: Allow
-                Action:
-                  - "logs:CreateLogGroup"
-                  - "logs:CreateLogStream"
-                  - "logs:PutLogEvents"
-                Resource: !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/${StackName}-CreateTables-function:*"
-              - Effect: Allow
-                Action:
-                  - "dynamodb:CreateTable"
-                  - "dynamodb:DeleteTable"
-                  - "dynamodb:UpdateTable"
-                  - "dynamodb:DescribeTable"
-                  - "dynamodb:ListTables"
-                  - "dynamodb:DescribeLimits"
-                  - "dynamodb:UpdateTimeToLive"
-                  - "dynamodb:DescribeTimeToLive"
-                  - "dynamodb:TagResource"
-                Resource: !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/AriaIdC*"
+      ManagedPolicyArns:
+        - !Ref CreateTablesManagedPolicy
       Tags:
         - Key: aria
           Value: role
@@ -152,8 +158,8 @@ Resources:
           Value: "no"
 
   # ListUsers Lambda
-  ListUsersRole:
-    Type: AWS::IAM::Role
+  ListUsersManagedPolicy:
+    Type: AWS::IAM::ManagedPolicy
     DeletionPolicy: Delete
     UpdateReplacePolicy: Delete
     Metadata:
@@ -166,6 +172,44 @@ Resources:
           - id: CKV_AWS_107
             comment: "IAM policy requires broad permissions for SSO and Identity Store operations, no credentials exposure risk"
     Properties:
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - "s3:GetObject"
+            Resource: !Sub "arn:aws:s3:::${S3SourceBucketName}/${ListUsersS3Key}"
+          - Effect: Allow
+            Action:
+              - "logs:CreateLogGroup"
+              - "logs:CreateLogStream"
+              - "logs:PutLogEvents"
+            Resource: !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/${StackName}-ListUsers-function:*"
+          - Effect: Allow
+            Action:
+              - "dynamodb:PutItem"
+            Resource: !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/AriaIdCUsers"
+          - Effect: Allow
+            Action:
+              - "identitystore:ListUsers"
+              - "sso:ListInstances"
+            Resource: "*"
+          - Effect: Allow
+            Action:
+              - "kms:DescribeKey"
+              - "kms:Decrypt"
+            Resource: !Sub arn:aws:kms:${AWS::Region}:${ManagementAccountId}:key/*
+            Condition:
+              StringEquals:
+                kms:ViaService:
+                  - !Sub sso.${AWS::Region}.amazonaws.com
+                  - !Sub identitystore.${AWS::Region}.amazonaws.com
+
+  ListUsersRole:
+    Type: AWS::IAM::Role
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
       AssumeRolePolicyDocument:
         Version: "2012-10-17"
         Statement:
@@ -173,40 +217,8 @@ Resources:
             Principal:
               Service: lambda.amazonaws.com
             Action: "sts:AssumeRole"
-      Policies:
-        - PolicyName: ListUsersPolicy
-          PolicyDocument:
-            Version: "2012-10-17"
-            Statement:
-              - Effect: Allow
-                Action:
-                  - "s3:GetObject"
-                Resource: !Sub "arn:aws:s3:::${S3SourceBucketName}/${ListUsersS3Key}"
-              - Effect: Allow
-                Action:
-                  - "logs:CreateLogGroup"
-                  - "logs:CreateLogStream"
-                  - "logs:PutLogEvents"
-                Resource: !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/${StackName}-ListUsers-function:*"
-              - Effect: Allow
-                Action:
-                  - "dynamodb:PutItem"
-                Resource: !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/AriaIdCUsers"
-              - Effect: Allow
-                Action:
-                  - "identitystore:ListUsers"
-                  - "sso:ListInstances"
-                Resource: "*"
-              - Effect: Allow
-                Action:
-                  - "kms:DescribeKey"
-                  - "kms:Decrypt"
-                Resource: !Sub arn:aws:kms:${AWS::Region}:${ManagementAccountId}:key/*
-                Condition:
-                  StringEquals:
-                    kms:ViaService:
-                      - !Sub sso.${AWS::Region}.amazonaws.com
-                      - !Sub identitystore.${AWS::Region}.amazonaws.com
+      ManagedPolicyArns:
+        - !Ref ListUsersManagedPolicy
       Tags:
         - Key: aria
           Value: role
@@ -278,8 +290,8 @@ Resources:
           Value: "no"
 
   # ListGroups Lambda
-  ListGroupsRole:
-    Type: AWS::IAM::Role
+  ListGroupsManagedPolicy:
+    Type: AWS::IAM::ManagedPolicy
     DeletionPolicy: Delete
     UpdateReplacePolicy: Delete
     Metadata:
@@ -292,6 +304,44 @@ Resources:
           - id: CKV_AWS_107
             comment: "IAM policy requires broad permissions for SSO and Identity Store operations, no credentials exposure risk"
     Properties:
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - "s3:GetObject"
+            Resource: !Sub "arn:aws:s3:::${S3SourceBucketName}/${ListGroupsS3Key}"
+          - Effect: Allow
+            Action:
+              - "logs:CreateLogGroup"
+              - "logs:CreateLogStream"
+              - "logs:PutLogEvents"
+            Resource: !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/${StackName}-ListGroups-function:*"
+          - Effect: Allow
+            Action:
+              - "dynamodb:PutItem"
+            Resource: !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/AriaIdCGroups"
+          - Effect: Allow
+            Action:
+              - "identitystore:ListGroups"
+              - "sso:ListInstances"
+            Resource: "*"
+          - Effect: Allow
+            Action:
+              - "kms:DescribeKey"
+              - "kms:Decrypt"
+            Resource: !Sub arn:aws:kms:${AWS::Region}:${ManagementAccountId}:key/*
+            Condition:
+              StringEquals:
+                kms:ViaService:
+                  - !Sub sso.${AWS::Region}.amazonaws.com
+                  - !Sub identitystore.${AWS::Region}.amazonaws.com
+
+  ListGroupsRole:
+    Type: AWS::IAM::Role
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
       AssumeRolePolicyDocument:
         Version: "2012-10-17"
         Statement:
@@ -299,40 +349,8 @@ Resources:
             Principal:
               Service: lambda.amazonaws.com
             Action: "sts:AssumeRole"
-      Policies:
-        - PolicyName: ListGroupsPolicy
-          PolicyDocument:
-            Version: "2012-10-17"
-            Statement:
-              - Effect: Allow
-                Action:
-                  - "s3:GetObject"
-                Resource: !Sub "arn:aws:s3:::${S3SourceBucketName}/${ListGroupsS3Key}"
-              - Effect: Allow
-                Action:
-                  - "logs:CreateLogGroup"
-                  - "logs:CreateLogStream"
-                  - "logs:PutLogEvents"
-                Resource: !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/${StackName}-ListGroups-function:*"
-              - Effect: Allow
-                Action:
-                  - "dynamodb:PutItem"
-                Resource: !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/AriaIdCGroups"
-              - Effect: Allow
-                Action:
-                  - "identitystore:ListGroups"
-                  - "sso:ListInstances"
-                Resource: "*"
-              - Effect: Allow
-                Action:
-                  - "kms:DescribeKey"
-                  - "kms:Decrypt"
-                Resource: !Sub arn:aws:kms:${AWS::Region}:${ManagementAccountId}:key/*
-                Condition:
-                  StringEquals:
-                    kms:ViaService:
-                      - !Sub sso.${AWS::Region}.amazonaws.com
-                      - !Sub identitystore.${AWS::Region}.amazonaws.com
+      ManagedPolicyArns:
+        - !Ref ListGroupsManagedPolicy
       Tags:
         - Key: aria
           Value: role
@@ -404,8 +422,8 @@ Resources:
           Value: "no"
 
   # ListGroupMembership Lambda
-  ListGroupMembershipRole:
-    Type: AWS::IAM::Role
+  ListGroupMembershipManagedPolicy:
+    Type: AWS::IAM::ManagedPolicy
     DeletionPolicy: Delete
     UpdateReplacePolicy: Delete
     Metadata:
@@ -418,6 +436,48 @@ Resources:
           - id: CKV_AWS_107
             comment: "IAM policy requires broad permissions for SSO and Identity Store operations, no credentials exposure risk"
     Properties:
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - "s3:GetObject"
+            Resource: !Sub "arn:aws:s3:::${S3SourceBucketName}/${ListGroupMembershipS3Key}"
+          - Effect: Allow
+            Action:
+              - "logs:CreateLogGroup"
+              - "logs:CreateLogStream"
+              - "logs:PutLogEvents"
+            Resource: !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/${StackName}-ListGroupMembership-function:*"
+          - Effect: Allow
+            Action:
+              - "dynamodb:PutItem"
+              - "dynamodb:Scan"
+            Resource:
+              - !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/AriaIdCGroupMembership"
+              - !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/AriaIdCGroups"
+          - Effect: Allow
+            Action:
+              - "identitystore:ListGroups"
+              - "identitystore:ListGroupMemberships"
+              - "sso:ListInstances"
+            Resource: "*"
+          - Effect: Allow
+            Action:
+              - "kms:DescribeKey"
+              - "kms:Decrypt"
+            Resource: !Sub arn:aws:kms:${AWS::Region}:${ManagementAccountId}:key/*
+            Condition:
+              StringEquals:
+                kms:ViaService:
+                  - !Sub sso.${AWS::Region}.amazonaws.com
+                  - !Sub identitystore.${AWS::Region}.amazonaws.com
+
+  ListGroupMembershipRole:
+    Type: AWS::IAM::Role
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
       AssumeRolePolicyDocument:
         Version: "2012-10-17"
         Statement:
@@ -425,44 +485,8 @@ Resources:
             Principal:
               Service: lambda.amazonaws.com
             Action: "sts:AssumeRole"
-      Policies:
-        - PolicyName: ListGroupMembershipPolicy
-          PolicyDocument:
-            Version: "2012-10-17"
-            Statement:
-              - Effect: Allow
-                Action:
-                  - "s3:GetObject"
-                Resource: !Sub "arn:aws:s3:::${S3SourceBucketName}/${ListGroupMembershipS3Key}"
-              - Effect: Allow
-                Action:
-                  - "logs:CreateLogGroup"
-                  - "logs:CreateLogStream"
-                  - "logs:PutLogEvents"
-                Resource: !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/${StackName}-ListGroupMembership-function:*"
-              - Effect: Allow
-                Action:
-                  - "dynamodb:PutItem"
-                  - "dynamodb:Scan"
-                Resource:
-                  - !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/AriaIdCGroupMembership"
-                  - !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/AriaIdCGroups"
-              - Effect: Allow
-                Action:
-                  - "identitystore:ListGroups"
-                  - "identitystore:ListGroupMemberships"
-                  - "sso:ListInstances"
-                Resource: "*"
-              - Effect: Allow
-                Action:
-                  - "kms:DescribeKey"
-                  - "kms:Decrypt"
-                Resource: !Sub arn:aws:kms:${AWS::Region}:${ManagementAccountId}:key/*
-                Condition:
-                  StringEquals:
-                    kms:ViaService:
-                      - !Sub sso.${AWS::Region}.amazonaws.com
-                      - !Sub identitystore.${AWS::Region}.amazonaws.com
+      ManagedPolicyArns:
+        - !Ref ListGroupMembershipManagedPolicy
       Tags:
         - Key: aria
           Value: role
@@ -534,8 +558,8 @@ Resources:
           Value: "no"
 
   # ListPermissionSets Lambda
-  ListPermissionSetsRole:
-    Type: AWS::IAM::Role
+  ListPermissionSetsManagedPolicy:
+    Type: AWS::IAM::ManagedPolicy
     DeletionPolicy: Delete
     UpdateReplacePolicy: Delete
     Metadata:
@@ -548,6 +572,46 @@ Resources:
           - id: CKV_AWS_107
             comment: "IAM policy requires broad permissions for SSO operations, no credentials exposure risk"
     Properties:
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - "s3:GetObject"
+            Resource: !Sub "arn:aws:s3:::${S3SourceBucketName}/${ListPermissionSetsS3Key}"
+          - Effect: Allow
+            Action:
+              - "logs:CreateLogGroup"
+              - "logs:CreateLogStream"
+              - "logs:PutLogEvents"
+            Resource: !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/${StackName}-ListPermissionSets-function:*"
+          - Effect: Allow
+            Action:
+              - "dynamodb:PutItem"
+            Resource: !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/AriaIdCPermissionSets"
+          - Effect: Allow
+            Action:
+              - "identitystore:ListGroups"
+              - "sso:ListInstances"
+              - "sso:ListPermissionSets"
+              - "sso:DescribePermissionSet"
+            Resource: "*"
+          - Effect: Allow
+            Action:
+              - "kms:DescribeKey"
+              - "kms:Decrypt"
+            Resource: !Sub arn:aws:kms:${AWS::Region}:${ManagementAccountId}:key/*
+            Condition:
+              StringEquals:
+                kms:ViaService:
+                  - !Sub sso.${AWS::Region}.amazonaws.com
+                  - !Sub identitystore.${AWS::Region}.amazonaws.com
+
+  ListPermissionSetsRole:
+    Type: AWS::IAM::Role
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
       AssumeRolePolicyDocument:
         Version: "2012-10-17"
         Statement:
@@ -555,42 +619,8 @@ Resources:
             Principal:
               Service: lambda.amazonaws.com
             Action: "sts:AssumeRole"
-      Policies:
-        - PolicyName: ListPermissionSetsPolicy
-          PolicyDocument:
-            Version: "2012-10-17"
-            Statement:
-              - Effect: Allow
-                Action:
-                  - "s3:GetObject"
-                Resource: !Sub "arn:aws:s3:::${S3SourceBucketName}/${ListPermissionSetsS3Key}"
-              - Effect: Allow
-                Action:
-                  - "logs:CreateLogGroup"
-                  - "logs:CreateLogStream"
-                  - "logs:PutLogEvents"
-                Resource: !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/${StackName}-ListPermissionSets-function:*"
-              - Effect: Allow
-                Action:
-                  - "dynamodb:PutItem"
-                Resource: !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/AriaIdCPermissionSets"
-              - Effect: Allow
-                Action:
-                  - "identitystore:ListGroups"
-                  - "sso:ListInstances"
-                  - "sso:ListPermissionSets"
-                  - "sso:DescribePermissionSet"
-                Resource: "*"
-              - Effect: Allow
-                Action:
-                  - "kms:DescribeKey"
-                  - "kms:Decrypt"
-                Resource: !Sub arn:aws:kms:${AWS::Region}:${ManagementAccountId}:key/*
-                Condition:
-                  StringEquals:
-                    kms:ViaService:
-                      - !Sub sso.${AWS::Region}.amazonaws.com
-                      - !Sub identitystore.${AWS::Region}.amazonaws.com
+      ManagedPolicyArns:
+        - !Ref ListPermissionSetsManagedPolicy
       Tags:
         - Key: aria
           Value: role
@@ -662,8 +692,8 @@ Resources:
           Value: "no"
 
   # ListProvisionedPermissionSets Lambda
-  ListProvisionedPermissionSetsRole:
-    Type: AWS::IAM::Role
+  ListProvisionedPermissionSetsManagedPolicy:
+    Type: AWS::IAM::ManagedPolicy
     DeletionPolicy: Delete
     UpdateReplacePolicy: Delete
     Metadata:
@@ -676,6 +706,54 @@ Resources:
           - id: CKV_AWS_107
             comment: "IAM policy requires broad permissions for SSO and Organizations operations, no credentials exposure risk"
     Properties:
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - "s3:GetObject"
+            Resource: !Sub "arn:aws:s3:::${S3SourceBucketName}/${ListProvisionedPermissionSetsS3Key}"
+          - Effect: Allow
+            Action:
+              - "logs:CreateLogGroup"
+              - "logs:CreateLogStream"
+              - "logs:PutLogEvents"
+            Resource: !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/${StackName}-ListProvisionedPermissionSets-function:*"
+          - Effect: Allow
+            Action:
+              - "dynamodb:PutItem"
+              - "dynamodb:Scan"
+              - "dynamodb:UpdateItem"
+              - "dynamodb:DeleteItem"
+              - "dynamodb:BatchWriteItem"
+            Resource: !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/AriaIdCProvisionedPermissionSets"
+          - Effect: Allow
+            Action:
+              - "sso:ListInstances"
+              - "sso:ListPermissionSetsProvisionedToAccount"
+              - "organizations:ListAccounts"
+              - "organizations:DescribeOrganization"
+            Resource: "*"
+          - Effect: Allow
+            Action:
+              - "dynamodb:Scan"
+            Resource:
+              - !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/AriaIdCAccounts"
+              - !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/AriaIdCPermissionSets"
+          - Effect: Allow
+            Action:
+              - "kms:DescribeKey"
+              - "kms:Decrypt"
+            Resource: !Sub arn:aws:kms:${AWS::Region}:${ManagementAccountId}:key/*
+            Condition:
+              StringEquals:
+                kms:ViaService: !Sub sso.${AWS::Region}.amazonaws.com
+
+  ListProvisionedPermissionSetsRole:
+    Type: AWS::IAM::Role
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
       AssumeRolePolicyDocument:
         Version: "2012-10-17"
         Statement:
@@ -683,50 +761,8 @@ Resources:
             Principal:
               Service: lambda.amazonaws.com
             Action: "sts:AssumeRole"
-      Policies:
-        - PolicyName: ListProvisionedPermissionSetsPolicy
-          PolicyDocument:
-            Version: "2012-10-17"
-            Statement:
-              - Effect: Allow
-                Action:
-                  - "s3:GetObject"
-                Resource: !Sub "arn:aws:s3:::${S3SourceBucketName}/${ListProvisionedPermissionSetsS3Key}"
-              - Effect: Allow
-                Action:
-                  - "logs:CreateLogGroup"
-                  - "logs:CreateLogStream"
-                  - "logs:PutLogEvents"
-                Resource: !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/${StackName}-ListProvisionedPermissionSets-function:*"
-              - Effect: Allow
-                Action:
-                  - "dynamodb:PutItem"
-                  - "dynamodb:Scan"
-                  - "dynamodb:UpdateItem"
-                  - "dynamodb:DeleteItem"
-                  - "dynamodb:BatchWriteItem"
-                Resource: !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/AriaIdCProvisionedPermissionSets"
-              - Effect: Allow
-                Action:
-                  - "sso:ListInstances"
-                  - "sso:ListPermissionSetsProvisionedToAccount"
-                  - "organizations:ListAccounts"
-                  - "organizations:DescribeOrganization"
-                Resource: "*"
-              - Effect: Allow
-                Action:
-                  - "dynamodb:Scan"
-                Resource:
-                  - !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/AriaIdCAccounts"
-                  - !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/AriaIdCPermissionSets"
-              - Effect: Allow
-                Action:
-                  - "kms:DescribeKey"
-                  - "kms:Decrypt"
-                Resource: !Sub arn:aws:kms:${AWS::Region}:${ManagementAccountId}:key/*
-                Condition:
-                  StringEquals:
-                    kms:ViaService: !Sub sso.${AWS::Region}.amazonaws.com
+      ManagedPolicyArns:
+        - !Ref ListProvisionedPermissionSetsManagedPolicy
       Tags:
         - Key: aria
           Value: role
@@ -798,8 +834,8 @@ Resources:
           Value: "no"
 
   # ListAccounts Lambda
-  ListAccountsRole:
-    Type: AWS::IAM::Role
+  ListAccountsManagedPolicy:
+    Type: AWS::IAM::ManagedPolicy
     DeletionPolicy: Delete
     UpdateReplacePolicy: Delete
     Metadata:
@@ -812,6 +848,33 @@ Resources:
           - id: CKV_AWS_107
             comment: "IAM policy requires broad permissions for Organizations operations, no credentials exposure risk"
     Properties:
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - "s3:GetObject"
+            Resource: !Sub "arn:aws:s3:::${S3SourceBucketName}/${ListAccountsS3Key}"
+          - Effect: Allow
+            Action:
+              - "logs:CreateLogGroup"
+              - "logs:CreateLogStream"
+              - "logs:PutLogEvents"
+            Resource: !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/${StackName}-ListAccounts-function:*"
+          - Effect: Allow
+            Action:
+              - "dynamodb:PutItem"
+            Resource: !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/AriaIdCAccounts"
+          - Effect: Allow
+            Action:
+              - "organizations:ListAccounts"
+            Resource: "*"
+
+  ListAccountsRole:
+    Type: AWS::IAM::Role
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
       AssumeRolePolicyDocument:
         Version: "2012-10-17"
         Statement:
@@ -819,29 +882,8 @@ Resources:
             Principal:
               Service: lambda.amazonaws.com
             Action: "sts:AssumeRole"
-      Policies:
-        - PolicyName: ListAccountsPolicy
-          PolicyDocument:
-            Version: "2012-10-17"
-            Statement:
-              - Effect: Allow
-                Action:
-                  - "s3:GetObject"
-                Resource: !Sub "arn:aws:s3:::${S3SourceBucketName}/${ListAccountsS3Key}"
-              - Effect: Allow
-                Action:
-                  - "logs:CreateLogGroup"
-                  - "logs:CreateLogStream"
-                  - "logs:PutLogEvents"
-                Resource: !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/${StackName}-ListAccounts-function:*"
-              - Effect: Allow
-                Action:
-                  - "dynamodb:PutItem"
-                Resource: !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/AriaIdCAccounts"
-              - Effect: Allow
-                Action:
-                  - "organizations:ListAccounts"
-                Resource: "*"
+      ManagedPolicyArns:
+        - !Ref ListAccountsManagedPolicy
       Tags:
         - Key: aria
           Value: role
@@ -913,8 +955,8 @@ Resources:
           Value: "no"
 
   # ListUserAccountAssignments Lambda
-  ListUserAccountAssignmentsRole:
-    Type: AWS::IAM::Role
+  ListUserAccountAssignmentsManagedPolicy:
+    Type: AWS::IAM::ManagedPolicy
     DeletionPolicy: Delete
     UpdateReplacePolicy: Delete
     Metadata:
@@ -927,6 +969,56 @@ Resources:
           - id: CKV_AWS_107
             comment: "IAM policy requires broad permissions for SSO and Organizations operations, no credentials exposure risk"
     Properties:
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - "s3:GetObject"
+            Resource: !Sub "arn:aws:s3:::${S3SourceBucketName}/${ListUserAccountAssignmentsS3Key}"
+          - Effect: Allow
+            Action:
+              - "logs:CreateLogGroup"
+              - "logs:CreateLogStream"
+              - "logs:PutLogEvents"
+            Resource: !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/${StackName}-ListUserAccountAssignments-function:*"
+          - Effect: Allow
+            Action:
+              - "dynamodb:PutItem"
+              - "dynamodb:BatchWriteItem"
+              - "dynamodb:Scan"
+              - "dynamodb:DeleteItem"
+            Resource: !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/AriaIdCUserAccountAssignments"
+          - Effect: Allow
+            Action:
+              - "dynamodb:GetItem"
+              - "dynamodb:Scan"
+            Resource:
+              - !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/AriaIdCPermissionSets"
+              - !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/AriaIdCAccounts"
+              - !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/AriaIdCUsers"
+          - Effect: Allow
+            Action:
+              - "sso:ListInstances"
+              - "sso:ListPermissionSetsProvisionedToAccount"
+              - "sso:ListAccountAssignmentsForPrincipal"
+              - "organizations:ListAccounts"
+              - "organizations:DescribeOrganization"
+            Resource: "*"
+          - Effect: Allow
+            Action:
+              - "kms:DescribeKey"
+              - "kms:Decrypt"
+            Resource: !Sub arn:aws:kms:${AWS::Region}:${ManagementAccountId}:key/*
+            Condition:
+              StringEquals:
+                kms:ViaService: !Sub sso.${AWS::Region}.amazonaws.com
+
+  ListUserAccountAssignmentsRole:
+    Type: AWS::IAM::Role
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
       AssumeRolePolicyDocument:
         Version: "2012-10-17"
         Statement:
@@ -934,49 +1026,8 @@ Resources:
             Principal:
               Service: lambda.amazonaws.com
             Action: "sts:AssumeRole"
-      Policies:
-        - PolicyName: ListUserAccountAssignmentsPolicy
-          PolicyDocument:
-            Version: "2012-10-17"
-            Statement:
-              - Effect: Allow
-                Action:
-                  - "s3:GetObject"
-                Resource: !Sub "arn:aws:s3:::${S3SourceBucketName}/${ListUserAccountAssignmentsS3Key}"
-              - Effect: Allow
-                Action:
-                  - "logs:CreateLogGroup"
-                  - "logs:CreateLogStream"
-                  - "logs:PutLogEvents"
-                Resource: !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/${StackName}-ListUserAccountAssignments-function:*"
-              - Effect: Allow
-                Action:
-                  - "dynamodb:PutItem"
-                Resource: !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/AriaIdCUserAccountAssignments"
-              - Effect: Allow
-                Action:
-                  - "dynamodb:GetItem"
-                  - "dynamodb:Scan"
-                Resource:
-                  - !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/AriaIdCPermissionSets"
-                  - !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/AriaIdCAccounts"
-                  - !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/AriaIdCUsers"
-              - Effect: Allow
-                Action:
-                  - "sso:ListInstances"
-                  - "sso:ListPermissionSetsProvisionedToAccount"
-                  - "sso:ListAccountAssignmentsForPrincipal"
-                  - "organizations:ListAccounts"
-                  - "organizations:DescribeOrganization"
-                Resource: "*"
-              - Effect: Allow
-                Action:
-                  - "kms:DescribeKey"
-                  - "kms:Decrypt"
-                Resource: !Sub arn:aws:kms:${AWS::Region}:${ManagementAccountId}:key/*
-                Condition:
-                  StringEquals:
-                    kms:ViaService: !Sub sso.${AWS::Region}.amazonaws.com
+      ManagedPolicyArns:
+        - !Ref ListUserAccountAssignmentsManagedPolicy
       Tags:
         - Key: aria
           Value: role
@@ -1008,8 +1059,8 @@ Resources:
         S3Bucket: !Ref S3SourceBucketName
         S3Key: !Ref ListUserAccountAssignmentsS3Key
       Runtime: python3.13
-      Timeout: 300
-      MemorySize: 256
+      Timeout: 900
+      MemorySize: 1024
       Environment:
         Variables:
           STACK_NAME: !Ref StackName
@@ -1048,8 +1099,8 @@ Resources:
           Value: "no"
 
   # ListGroupAccountAssignments Lambda
-  ListGroupAccountAssignmentsRole:
-    Type: AWS::IAM::Role
+  ListGroupAccountAssignmentsManagedPolicy:
+    Type: AWS::IAM::ManagedPolicy
     DeletionPolicy: Delete
     UpdateReplacePolicy: Delete
     Metadata:
@@ -1062,6 +1113,57 @@ Resources:
           - id: CKV_AWS_107
             comment: "IAM policy requires broad permissions for SSO and Organizations operations, no credentials exposure risk"
     Properties:
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - "s3:GetObject"
+            Resource: !Sub "arn:aws:s3:::${S3SourceBucketName}/${ListGroupAccountAssignmentsS3Key}"
+          - Effect: Allow
+            Action:
+              - "logs:CreateLogGroup"
+              - "logs:CreateLogStream"
+              - "logs:PutLogEvents"
+            Resource: !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/${StackName}-ListGroupAccountAssignments-function:*"
+          - Effect: Allow
+            Action:
+              - "dynamodb:PutItem"
+              - "dynamodb:Scan"
+              - "dynamodb:DeleteItem"
+              - "dynamodb:UpdateItem"
+              - "dynamodb:BatchWriteItem"
+            Resource: !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/AriaIdCGroupAccountAssignments"
+          - Effect: Allow
+            Action:
+              - "dynamodb:GetItem"
+              - "dynamodb:Scan"
+            Resource:
+              - !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/AriaIdCPermissionSets"
+              - !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/AriaIdCAccounts"
+              - !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/AriaIdCGroups"
+          - Effect: Allow
+            Action:
+              - "sso:ListInstances"
+              - "sso:ListPermissionSetsProvisionedToAccount"
+              - "sso:ListAccountAssignmentsForPrincipal"
+              - "organizations:ListAccounts"
+              - "organizations:DescribeOrganization"
+            Resource: "*"
+          - Effect: Allow
+            Action:
+              - "kms:DescribeKey"
+              - "kms:Decrypt"
+            Resource: !Sub arn:aws:kms:${AWS::Region}:${ManagementAccountId}:key/*
+            Condition:
+              StringEquals:
+                kms:ViaService: !Sub sso.${AWS::Region}.amazonaws.com
+
+  ListGroupAccountAssignmentsRole:
+    Type: AWS::IAM::Role
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
       AssumeRolePolicyDocument:
         Version: "2012-10-17"
         Statement:
@@ -1069,53 +1171,8 @@ Resources:
             Principal:
               Service: lambda.amazonaws.com
             Action: "sts:AssumeRole"
-      Policies:
-        - PolicyName: ListGroupAccountAssignmentsPolicy
-          PolicyDocument:
-            Version: "2012-10-17"
-            Statement:
-              - Effect: Allow
-                Action:
-                  - "s3:GetObject"
-                Resource: !Sub "arn:aws:s3:::${S3SourceBucketName}/${ListGroupAccountAssignmentsS3Key}"
-              - Effect: Allow
-                Action:
-                  - "logs:CreateLogGroup"
-                  - "logs:CreateLogStream"
-                  - "logs:PutLogEvents"
-                Resource: !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/${StackName}-ListGroupAccountAssignments-function:*"
-              - Effect: Allow
-                Action:
-                  - "dynamodb:PutItem"
-                  - "dynamodb:Scan"
-                  - "dynamodb:DeleteItem"
-                  - "dynamodb:UpdateItem"
-                  - "dynamodb:BatchWriteItem"
-                Resource: !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/AriaIdCGroupAccountAssignments"
-              - Effect: Allow
-                Action:
-                  - "dynamodb:GetItem"
-                  - "dynamodb:Scan"
-                Resource:
-                  - !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/AriaIdCPermissionSets"
-                  - !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/AriaIdCAccounts"
-                  - !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/AriaIdCGroups"
-              - Effect: Allow
-                Action:
-                  - "sso:ListInstances"
-                  - "sso:ListPermissionSetsProvisionedToAccount"
-                  - "sso:ListAccountAssignmentsForPrincipal"
-                  - "organizations:ListAccounts"
-                  - "organizations:DescribeOrganization"
-                Resource: "*"
-              - Effect: Allow
-                Action:
-                  - "kms:DescribeKey"
-                  - "kms:Decrypt"
-                Resource: !Sub arn:aws:kms:${AWS::Region}:${ManagementAccountId}:key/*
-                Condition:
-                  StringEquals:
-                    kms:ViaService: !Sub sso.${AWS::Region}.amazonaws.com
+      ManagedPolicyArns:
+        - !Ref ListGroupAccountAssignmentsManagedPolicy
       Tags:
         - Key: aria
           Value: role
@@ -1147,8 +1204,8 @@ Resources:
         S3Bucket: !Ref S3SourceBucketName
         S3Key: !Ref ListGroupAccountAssignmentsS3Key
       Runtime: python3.13
-      Timeout: 300
-      MemorySize: 256
+      Timeout: 900
+      MemorySize: 1024
       Environment:
         Variables:
           STACK_NAME: !Ref StackName
@@ -1187,19 +1244,58 @@ Resources:
           Value: "no"
 
   # GetIAMRoles Lambda Execution Role
-  GetIAMRolesExecutionRole:
-    Type: AWS::IAM::Role
+  GetIAMRolesManagedPolicy:
+    Type: AWS::IAM::ManagedPolicy
     DeletionPolicy: Delete
     UpdateReplacePolicy: Delete
     Metadata:
       cfn_nag:
         rules_to_suppress:
           - id: W11
-            reason: "Organizations and STS services require '*' resource for ListAccounts and AssumeRole operations across multiple accounts"
+            reason: "organizations:ListAccounts does not support resource-level permissions and requires '*'; sts:AssumeRole is scoped to the AriaIdCInventoryAccessRole-LimitedReadOnly role"
       checkov:
         skip:
           - id: CKV_AWS_107
             comment: "IAM policy requires broad permissions for Organizations and STS operations, no credentials exposure risk"
+    Properties:
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - "s3:GetObject"
+            Resource: !Sub "arn:aws:s3:::${S3SourceBucketName}/${GetIAMRolesS3Key}"
+          - Effect: Allow
+            Action:
+              - "logs:CreateLogGroup"
+              - "logs:CreateLogStream"
+              - "logs:PutLogEvents"
+            Resource: !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/${StackName}-GetIAMRoles-function:*"
+          - Effect: Allow
+            Action:
+              - "dynamodb:PutItem"
+              - "dynamodb:Scan"
+              - "dynamodb:UpdateItem"
+              - "dynamodb:DeleteItem"
+              - "dynamodb:BatchWriteItem"
+              - "dynamodb:GetItem"
+            Resource:
+              - !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/AriaIdCIAMRoles"
+              - !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/AriaIdCProvisionedPermissionSets"
+              - !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/AriaIdCAccounts"
+          - Effect: Allow
+            Action:
+              - "organizations:ListAccounts"
+            Resource: "*"
+          - Effect: Allow
+            Action:
+              - "sts:AssumeRole"
+            Resource: "arn:aws:iam::*:role/AriaIdCInventoryAccessRole-LimitedReadOnly"
+
+  GetIAMRolesExecutionRole:
+    Type: AWS::IAM::Role
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
     Properties:
       AssumeRolePolicyDocument:
         Version: "2012-10-17"
@@ -1208,38 +1304,8 @@ Resources:
             Principal:
               Service: lambda.amazonaws.com
             Action: "sts:AssumeRole"
-      Policies:
-        - PolicyName: GetIAMRolesPolicy
-          PolicyDocument:
-            Version: "2012-10-17"
-            Statement:
-              - Effect: Allow
-                Action:
-                  - "s3:GetObject"
-                Resource: !Sub "arn:aws:s3:::${S3SourceBucketName}/${GetIAMRolesS3Key}"
-              - Effect: Allow
-                Action:
-                  - "logs:CreateLogGroup"
-                  - "logs:CreateLogStream"
-                  - "logs:PutLogEvents"
-                Resource: !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/${StackName}-GetIAMRoles-function:*"
-              - Effect: Allow
-                Action:
-                  - "dynamodb:PutItem"
-                  - "dynamodb:Scan"
-                  - "dynamodb:UpdateItem"
-                  - "dynamodb:DeleteItem"
-                  - "dynamodb:BatchWriteItem"
-                  - "dynamodb:GetItem"
-                Resource:
-                  - !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/AriaIdCIAMRoles"
-                  - !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/AriaIdCProvisionedPermissionSets"
-                  - !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/AriaIdCAccounts"
-              - Effect: Allow
-                Action:
-                  - "organizations:ListAccounts"
-                  - "sts:AssumeRole"
-                Resource: "*"
+      ManagedPolicyArns:
+        - !Ref GetIAMRolesManagedPolicy
       Tags:
         - Key: aria
           Value: role
@@ -1271,8 +1337,8 @@ Resources:
         S3Bucket: !Ref S3SourceBucketName
         S3Key: !Ref GetIAMRolesS3Key
       Runtime: python3.13
-      Timeout: 300
-      MemorySize: 256
+      Timeout: 900
+      MemorySize: 1024
       Environment:
         Variables:
           STACK_NAME: !Ref StackName
@@ -1311,6 +1377,35 @@ Resources:
           Value: "no"
 
   # S3Export Lambda
+  S3ExportManagedPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - "s3:GetObject"
+            Resource: !Sub "arn:aws:s3:::${S3SourceBucketName}/${S3ExportS3Key}"
+          - Effect: Allow
+            Action:
+              - "logs:CreateLogGroup"
+              - "logs:CreateLogStream"
+              - "logs:PutLogEvents"
+            Resource: !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/${StackName}-S3Export-function:*"
+          - Effect: Allow
+            Action:
+              - "dynamodb:GetItem"
+              - "dynamodb:Scan"
+            Resource: !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/AriaIdC*"
+          - Effect: Allow
+            Action:
+              - "s3:PutObject"
+              - "s3:DeleteObject"
+            Resource: !Sub "arn:aws:s3:::${S3ExportBucketName}/*"
+
   S3ExportRole:
     Type: AWS::IAM::Role
     DeletionPolicy: Delete
@@ -1323,31 +1418,8 @@ Resources:
             Principal:
               Service: lambda.amazonaws.com
             Action: "sts:AssumeRole"
-      Policies:
-        - PolicyName: S3ExportPolicy
-          PolicyDocument:
-            Version: "2012-10-17"
-            Statement:
-              - Effect: Allow
-                Action:
-                  - "s3:GetObject"
-                Resource: !Sub "arn:aws:s3:::${S3SourceBucketName}/${S3ExportS3Key}"
-              - Effect: Allow
-                Action:
-                  - "logs:CreateLogGroup"
-                  - "logs:CreateLogStream"
-                  - "logs:PutLogEvents"
-                Resource: !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/${StackName}-S3Export-function:*"
-              - Effect: Allow
-                Action:
-                  - "dynamodb:GetItem"
-                  - "dynamodb:Scan"
-                Resource: !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/AriaIdC*"
-              - Effect: Allow
-                Action:
-                  - "s3:PutObject"
-                  - "s3:DeleteObject"
-                Resource: !Sub "arn:aws:s3:::${S3ExportBucketName}/*"
+      ManagedPolicyArns:
+        - !Ref S3ExportManagedPolicy
       Tags:
         - Key: aria
           Value: role
@@ -1419,8 +1491,8 @@ Resources:
           Value: "no"
 
   # AccessAnalyzerFindingIngestion Lambda
-  AccessAnalyzerFindingIngestionRole:
-    Type: AWS::IAM::Role
+  AccessAnalyzerFindingIngestionManagedPolicy:
+    Type: AWS::IAM::ManagedPolicy
     DeletionPolicy: Delete
     UpdateReplacePolicy: Delete
     Metadata:
@@ -1433,6 +1505,34 @@ Resources:
           - id: CKV_AWS_107
             comment: "IAM policy requires broad permissions for Access Analyzer operations, no credentials exposure risk"
     Properties:
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - "s3:GetObject"
+            Resource: !Sub "arn:aws:s3:::${S3SourceBucketName}/${AccessAnalyzerFindingIngestionS3Key}"
+          - Effect: Allow
+            Action:
+              - "logs:CreateLogGroup"
+              - "logs:CreateLogStream"
+              - "logs:PutLogEvents"
+            Resource: !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/${StackName}-AccessAnalyzerFindingIngestion-function:*"
+          - Effect: Allow
+            Action:
+              - "dynamodb:PutItem"
+              - "dynamodb:UpdateItem"
+              - "dynamodb:DeleteItem"
+            Resource:
+              - !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/AriaIdCInternalAAFindings"
+              - !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/AriaIdCUnusedAAFindings"
+              - !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/AriaIdCExternalAAFindings"
+
+  AccessAnalyzerFindingIngestionRole:
+    Type: AWS::IAM::Role
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
       AssumeRolePolicyDocument:
         Version: "2012-10-17"
         Statement:
@@ -1440,30 +1540,8 @@ Resources:
             Principal:
               Service: lambda.amazonaws.com
             Action: "sts:AssumeRole"
-      Policies:
-        - PolicyName: AccessAnalyzerFindingIngestionPolicy
-          PolicyDocument:
-            Version: "2012-10-17"
-            Statement:
-              - Effect: Allow
-                Action:
-                  - "s3:GetObject"
-                Resource: !Sub "arn:aws:s3:::${S3SourceBucketName}/${AccessAnalyzerFindingIngestionS3Key}"
-              - Effect: Allow
-                Action:
-                  - "logs:CreateLogGroup"
-                  - "logs:CreateLogStream"
-                  - "logs:PutLogEvents"
-                Resource: !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/${StackName}-AccessAnalyzerFindingIngestion-function:*"
-              - Effect: Allow
-                Action:
-                  - "dynamodb:PutItem"
-                  - "dynamodb:UpdateItem"
-                  - "dynamodb:DeleteItem"
-                Resource:
-                  - !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/AriaIdCInternalAAFindings"
-                  - !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/AriaIdCUnusedAAFindings"
-                  - !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/AriaIdCExternalAAFindings"
+      ManagedPolicyArns:
+        - !Ref AccessAnalyzerFindingIngestionManagedPolicy
       Tags:
         - Key: aria
           Value: role
@@ -1535,6 +1613,33 @@ Resources:
           Value: "no"
 
   # UpdateFunctionCode Lambda
+  UpdateFunctionCodeManagedPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - "s3:GetObject"
+            Resource: !Sub "arn:aws:s3:::${S3SourceBucketName}/*"
+          - Effect: Allow
+            Action:
+              - "logs:CreateLogGroup"
+              - "logs:CreateLogStream"
+              - "logs:PutLogEvents"
+            Resource: !Sub "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/${StackName}-UpdateFunctionCode-function:*"
+          - Effect: Allow
+            Action:
+              - "ssm:GetParameter*"
+            Resource: !Sub "arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/aria/lambda/*"
+          - Effect: Allow
+            Action:
+              - "lambda:UpdateFunctionCode"
+            Resource: !Sub "arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:${StackName}-*"
+
   UpdateFunctionCodeRole:
     Type: AWS::IAM::Role
     DeletionPolicy: Delete
@@ -1547,29 +1652,8 @@ Resources:
             Principal:
               Service: lambda.amazonaws.com
             Action: "sts:AssumeRole"
-      Policies:
-        - PolicyName: UpdateFunctionCodePolicy
-          PolicyDocument:
-            Version: "2012-10-17"
-            Statement:
-              - Effect: Allow
-                Action:
-                  - "s3:GetObject"
-                Resource: !Sub "arn:aws:s3:::${S3SourceBucketName}/*"
-              - Effect: Allow
-                Action:
-                  - "logs:CreateLogGroup"
-                  - "logs:CreateLogStream"
-                  - "logs:PutLogEvents"
-                Resource: !Sub "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/${StackName}-UpdateFunctionCode-function:*"
-              - Effect: Allow
-                Action:
-                  - "ssm:GetParameter*"
-                Resource: !Sub "arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/aria/lambda/*"
-              - Effect: Allow
-                Action:
-                  - "lambda:UpdateFunctionCode"
-                Resource: !Sub "arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:${StackName}-*"
+      ManagedPolicyArns:
+        - !Ref UpdateFunctionCodeManagedPolicy
       Tags:
         - Key: aria
           Value: role

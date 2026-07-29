@@ -1,0 +1,21 @@
+[project]
+name = "aria-gv-mcp"
+version = "1.0.0"
+description = "MCP server for querying the ARIA-gv (Access Rights for Identity on AWS) Neptune Analytics identity access graph."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT-0" }
+dependencies = [
+    "mcp>=1.10.0",
+    "boto3>=1.34.0",
+]
+
+[project.scripts]
+aria-gv-mcp-http = "aria_mcp_server.server:main_http"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["aria_mcp_server"]

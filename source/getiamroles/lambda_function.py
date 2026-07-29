@@ -1,15 +1,55 @@
 import json
+import os
 import boto3
-import time
-from datetime import datetime
-from boto3.dynamodb.conditions import Attr
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from botocore.config import Config
 from botocore.exceptions import ClientError
 
+# Role to assume in member accounts (created via StackSet, must exist in all accounts)
+ROLE_TO_ASSUME = 'AriaIdCInventoryAccessRole-LimitedReadOnly'
+
+# Reuse clients/resources across warm invocations. Adaptive retries absorb the
+# throttling from running many STS/IAM calls concurrently.
+BOTO_CONFIG = Config(
+    retries={'max_attempts': 10, 'mode': 'adaptive'},
+    max_pool_connections=50
+)
+sts_client = boto3.client('sts', config=BOTO_CONFIG)
+dynamodb = boto3.resource('dynamodb')
+
+# Accounts processed concurrently. The per-account work (assume role, list roles,
+# list attached policies) is I/O bound, so threading is the largest wall-clock win.
+MAX_WORKERS = int(os.environ.get('MAX_WORKERS', '10'))
+
+# Stop submitting new work once fewer than this many milliseconds remain, so
+# in-flight results can still be flushed to DynamoDB before the Lambda timeout.
+RUNTIME_SAFETY_BUFFER_MS = 30_000
+
+# Length of the trailing "_<random-suffix>" that IAM Identity Center appends to
+# AWSReservedSSO_<PermissionSetName> role names.
+SSO_ROLE_SUFFIX_LEN = 17
+
+
+def _scan_all(table, **kwargs):
+    # Scan a table fully, following pagination. A plain table.scan() only returns
+    # the first 1 MB page, which silently drops data on larger tables.
+    items = []
+    response = table.scan(**kwargs)
+    items.extend(response.get('Items', []))
+    while 'LastEvaluatedKey' in response:
+        response = table.scan(ExclusiveStartKey=response['LastEvaluatedKey'], **kwargs)
+        items.extend(response.get('Items', []))
+    return items
+
+
+def _chunk(items, size):
+    for i in range(0, len(items), size):
+        yield items[i:i + size]
+
+
 def assume_role(account_id, role_name):
-    # Assume a role in target account
-    sts_client = boto3.client('sts')
+    # Assume a role in the target account
     try:
-        # print(f"Assuming role {role_name} in account {account_id}")
         response = sts_client.assume_role(
             RoleArn=f'arn:aws:iam::{account_id}:role/{role_name}',
             RoleSessionName='ListSSORolesSession'
@@ -19,26 +59,26 @@ def assume_role(account_id, role_name):
         print(f"Error assuming role in account {account_id}: {e}")
         return None
 
+
 def list_idc_roles_in_account(credentials, account_id):
     # List IAM roles created by IAM Identity Center in a specific account
     if not credentials:
         return []
-    else:
-        iam = boto3.client('iam',
-            aws_access_key_id=credentials['AccessKeyId'],
-            aws_secret_access_key=credentials['SecretAccessKey'],
-            aws_session_token=credentials['SessionToken']
-        )
-    
+
+    iam = boto3.client(
+        'iam',
+        aws_access_key_id=credentials['AccessKeyId'],
+        aws_secret_access_key=credentials['SecretAccessKey'],
+        aws_session_token=credentials['SessionToken'],
+        config=BOTO_CONFIG
+    )
+
     try:
         idc_roles = []
         paginator = iam.get_paginator('list_roles')
-        
         for page in paginator.paginate():
             for role in page['Roles']:
                 if role['RoleName'].startswith('AWSReservedSSO_'):
-                    # print(f"Found Identity Center IAM role: {role['RoleName']}")
-
                     # Get attached policies
                     policies = iam.list_attached_role_policies(RoleName=role['RoleName'])
                     idc_roles.append({
@@ -54,97 +94,102 @@ def list_idc_roles_in_account(credentials, account_id):
         print(f"Error listing roles in account {account_id}: {e}")
         return []
 
-# Get all permission sets and accounts cached in dynamodb table AriaIdCProvisionedPermissionSets
-def get_provisioned_permission_sets(account_id):
-    # Get list of all permission sets in AriaIdCProvisionedPermissionSets for a given Account
-    dynamodb = boto3.resource('dynamodb')
-    provisioned_permission_sets_table = dynamodb.Table('AriaIdCProvisionedPermissionSets')
-    provisioned_permission_sets = []
 
-    try:
-        # Construct the Filter Expression
-        filter_expression = (Attr('AccountId').eq(account_id))
-        response = provisioned_permission_sets_table.scan(
-           FilterExpression=filter_expression
-        )
+def build_provisioned_permission_set_index():
+    # Scan AriaIdCProvisionedPermissionSets once and index it as
+    # AccountId -> {PermissionSetName: PermissionSetArn}.
+    #
+    # The previous approach ran a filtered full-table scan per account (AccountId
+    # is the sort key, not the partition key, so it could not be queried directly).
+    # A single scan plus an in-memory dict removes that accounts x scans cost and
+    # turns the per-role lookup into O(1).
+    table = dynamodb.Table('AriaIdCProvisionedPermissionSets')
+    index = {}
+    for item in _scan_all(table):
+        account_id = item.get('AccountId')
+        if account_id is None:
+            continue
+        index.setdefault(account_id, {})[item.get('PermissionSetName')] = item.get('PermissionSetArn')
+    return index
 
-        # Process items in the response
-        for item in response['Items']:
-            provisioned_permission_set = {
-                'AccountId': item.get('AccountId', 'N/A'),
-                'AccountName': item.get('AccountName', 'N/A'),
-                'PermissionSetArn': item.get('PermissionSetArn', 'N/A'),
-                'PermissionSetName': item.get('PermissionSetName', 'N/A')
-            }
-            provisioned_permission_sets.append(provisioned_permission_set)
-        return provisioned_permission_sets
-    except ClientError as e:
-        print(f"An error occurred: {e.response['Error']['Message']}")
-        return None
 
-# Initialize clients
-def initialize_clients():
-    # Initialize required AWS clients
-    dynamodb = boto3.resource('dynamodb')
-    return dynamodb
+def collect_roles_for_account(account_id, permset_index):
+    # Assume into the account, list its Identity Center roles, and build the rows
+    # to write. Runs inside a worker thread; performs only reads.
+    credentials = assume_role(account_id, ROLE_TO_ASSUME)
+    idc_roles = list_idc_roles_in_account(credentials, account_id)
+    account_permsets = permset_index.get(account_id, {})
+
+    items = []
+    for role in idc_roles:
+        # Strip the "AWSReservedSSO_" prefix and the trailing "_<suffix>".
+        permsetname = role['RoleName'].replace('AWSReservedSSO_', '')[:-SSO_ROLE_SUFFIX_LEN]
+        # Default to 'N/A' when there is no matching provisioned permission set,
+        # rather than leaving the value unbound or stale from a previous role.
+        permsetarn = account_permsets.get(permsetname, 'N/A')
+
+        items.append({
+            'IamRoleArn': role['Arn'],
+            'RoleName': role['RoleName'],
+            'AccountId': role['AccountId'],
+            'RoleId': role['RoleId'],
+            'AttachedPolicies': role['AttachedPolicies'],
+            'PermissionSetName': permsetname,
+            'PermissionSetArn': permsetarn,
+            'CreateDate': role['CreateDate'].isoformat()
+        })
+    return items
+
 
 def empty_iam_roles_table():
-    # Empty the provisioned permission sets table
-    dynamodb = boto3.resource('dynamodb')
+    # Empty the IAM roles table before repopulating it.
     table = dynamodb.Table('AriaIdCIAMRoles')
-    scan = table.scan()
     with table.batch_writer() as batch:
-        for each in scan['Items']:
-            batch.delete_item(
-                Key={
-                    'IamRoleArn': each['IamRoleArn']
-                }
-            )
+        for item in _scan_all(table, ProjectionExpression='IamRoleArn'):
+            batch.delete_item(Key={'IamRoleArn': item['IamRoleArn']})
+
 
 def lambda_handler(event, context):
 
-    # Role to assume in member accounts (needs to exist in all accounts) - created using stackset (see elsewhere)
-    role_to_assume = 'AriaIdCInventoryAccessRole-LimitedReadOnly'
-
-    dynamodb = initialize_clients()
     accounts_table = dynamodb.Table('AriaIdCAccounts')
     iamroles_table = dynamodb.Table('AriaIdCIAMRoles')
-    
-    empty_iam_roles_table()
-    
-    for account in accounts_table.scan()['Items']:
-        account_id=account['AccountId']
-        
-        # Get all provisioned permission sets in account
-        # print(f"Fetching list of provisioned permission sets in account {account_id}")
-        provisioned_permission_sets_in_account = []
-        provisioned_permission_sets_in_account = get_provisioned_permission_sets(account_id)
-        
-        credentials = assume_role(account_id, role_to_assume)
-        idc_roles = []
-        idc_roles = list_idc_roles_in_account(credentials, account_id)
-    
-        for role in idc_roles:
-            permsetname = role['RoleName'].replace('AWSReservedSSO_', '')
-            permsetname = permsetname[:-17]
 
-            # If permsetname exists in provisioned_permission_sets then get the permsetarn
-            for permissionset in provisioned_permission_sets_in_account:
-                # for permset in permissionset:
-                if permissionset['PermissionSetName'] == permsetname:
-                    permsetarn = permissionset['PermissionSetArn']
-                    # print(f"Permission Set Name: {permsetname}, Permission Set Arn: {permsetarn}, IAM Role Name: {role['RoleName']}, IAM Role Arn: {role['Arn']}")
+    # Build the lookup index once, up front, then clear the destination table.
+    permset_index = build_provisioned_permission_set_index()
+    empty_iam_roles_table()
+
+    account_ids = [item['AccountId'] for item in _scan_all(accounts_table, ProjectionExpression='AccountId')]
+    total = len(account_ids)
+    processed = 0
+    written = 0
+    print(f"Processing {total} accounts with up to {MAX_WORKERS} workers")
+
+    # batch_writer is driven only from this main thread (thread-safe); worker
+    # threads perform the read-only assume-role/list-roles calls in parallel.
+    with iamroles_table.batch_writer() as batch:
+        with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+            for chunk in _chunk(account_ids, MAX_WORKERS):
+                if context is not None and context.get_remaining_time_in_millis() < RUNTIME_SAFETY_BUFFER_MS:
+                    print(f"Approaching Lambda timeout; stopping after {processed}/{total} accounts")
                     break
 
-            # Write role information to DynamoDB
-            # print(f"Writing role information to DynamoDB table for account {account_id}")
-            iamroles_table.put_item(Item={
-                'IamRoleArn': role['Arn'],
-                'RoleName': role['RoleName'],
-                'AccountId': role['AccountId'],
-                'RoleId': role['RoleId'],
-                'AttachedPolicies': role['AttachedPolicies'],
-                'PermissionSetName': permsetname,
-                'PermissionSetArn': permsetarn,
-                'CreateDate': role['CreateDate'].isoformat()
-            })
+                future_to_account = {
+                    executor.submit(collect_roles_for_account, account_id, permset_index): account_id
+                    for account_id in chunk
+                }
+                for future in as_completed(future_to_account):
+                    account_id = future_to_account[future]
+                    try:
+                        for item in future.result():
+                            batch.put_item(Item=item)
+                            written += 1
+                    except Exception as e:
+                        print(f"Error processing account {account_id}: {e}")
+                processed += len(chunk)
+
+    message = f"Wrote {written} IAM roles across {processed}/{total} accounts"
+    print(message)
+    return {
+        'statusCode': 200,
+        'body': json.dumps({'message': message, 'complete': processed >= total})
+    }

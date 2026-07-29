@@ -1,6 +1,6 @@
 ### Creating and deploying IAM role to enable cross-account IAM role for collection of IAM Identity Center provisioned IAM roles
 
-Run this in the Management account to deploy a CloudFormation stackset that will create the IAM role needed to allow inventory of IAM roles iounts
+Run this in the Management account to deploy a CloudFormation stackset that will create the IAM role needed to allow inventory of IAM roles in all accounts
 
 *Caveat: Skip step 1 if your AWS IAM Identity Center is running in your management account and you have NOT delegated the administration to a member account*
 

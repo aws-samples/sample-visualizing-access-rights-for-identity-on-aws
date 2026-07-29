@@ -1,0 +1,474 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: "Hosts the ARIA-gv MCP server on Amazon Bedrock AgentCore Runtime (VPC mode) with Cognito JWT inbound auth"
+
+Parameters:
+  ContainerImageUri:
+    Type: String
+    Description: >-
+      Full ECR image URI (including tag) of the ARM64 MCP server image, e.g.
+      123456789012.dkr.ecr.us-east-1.amazonaws.com/aria-gv-mcp:latest. Build and
+      push it first with mcp-server/build-and-push.sh.
+
+  AgentRuntimeName:
+    Type: String
+    Description: "Name for the AgentCore Runtime (letters, numbers, underscores only)"
+    Default: "aria_gv_mcp"
+    AllowedPattern: "^[a-zA-Z][a-zA-Z0-9_]{0,47}$"
+
+  AccessTokenValidityHours:
+    Type: Number
+    Description: "Cognito access token lifetime in hours for the M2M client (1-24)"
+    Default: 12
+    MinValue: 1
+    MaxValue: 24
+
+  # Neptune wiring - passed from the Neptune Analytics stack outputs.
+  NeptuneVPC:
+    Type: AWS::EC2::VPC::Id
+    Description: "VPC that contains the Neptune Analytics private endpoint"
+
+  # AgentCore Runtime only supports a subset of availability zones. Rather than
+  # reuse the Neptune subnets (which may sit in unsupported AZs), the runtime is
+  # given dedicated subnets pinned to supported AZ IDs. AZ IDs (use1-azN) are
+  # stable across accounts, unlike AZ names (us-east-1a). Defaults are for
+  # us-east-1; override for other regions using that region's supported AZ IDs.
+  RuntimeSubnet1AzId:
+    Type: String
+    Description: "AZ ID for the first runtime subnet (must be AgentCore-supported)"
+    Default: "use1-az1"
+
+  RuntimeSubnet2AzId:
+    Type: String
+    Description: "AZ ID for the second runtime subnet (must be AgentCore-supported)"
+    Default: "use1-az2"
+
+  RuntimeSubnet1Cidr:
+    Type: String
+    Description: "CIDR for the first runtime subnet (must fit within the Neptune VPC CIDR and not overlap existing subnets)"
+    Default: "172.32.10.0/24"
+
+  RuntimeSubnet2Cidr:
+    Type: String
+    Description: "CIDR for the second runtime subnet (must fit within the Neptune VPC CIDR and not overlap existing subnets)"
+    Default: "172.32.11.0/24"
+
+  NeptuneAnalyticsSecurityGroup:
+    Type: AWS::EC2::SecurityGroup::Id
+    Description: "Security group on the neptune-graph VPC endpoints (ingress is added for the runtime)"
+
+  NeptuneGraphId:
+    Type: String
+    Description: "Neptune Analytics graph id (e.g. g-xxxxxxxx)"
+
+  NeptuneGraphArn:
+    Type: String
+    Description: "Neptune Analytics graph ARN (scopes the execute-query permission)"
+
+Resources:
+  # ---------------------------------------------------------------------------
+  # Networking: a dedicated SG for the runtime ENIs, plus an ingress rule on the
+  # existing neptune-graph endpoint SG so the runtime can reach the graph over
+  # 443. This is the only change made to existing Neptune resources.
+  # ---------------------------------------------------------------------------
+  # Dedicated private subnets for the runtime ENIs, in AgentCore-supported AZs.
+  # The VPC's local route lets them reach the neptune-graph interface endpoints in
+  # the Neptune subnets cross-AZ; no IGW/NAT is required.
+  RuntimeSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref NeptuneVPC
+      CidrBlock: !Ref RuntimeSubnet1Cidr
+      AvailabilityZoneId: !Ref RuntimeSubnet1AzId
+      MapPublicIpOnLaunch: false
+      Tags:
+        - Key: aria
+          Value: agentcore-runtime-subnet-1
+        - Key: auto-delete
+          Value: "no"
+
+  RuntimeSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref NeptuneVPC
+      CidrBlock: !Ref RuntimeSubnet2Cidr
+      AvailabilityZoneId: !Ref RuntimeSubnet2AzId
+      MapPublicIpOnLaunch: false
+      Tags:
+        - Key: aria
+          Value: agentcore-runtime-subnet-2
+        - Key: auto-delete
+          Value: "no"
+
+  AgentCoreRuntimeSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W40
+            reason: "Egress IpProtocol -1 to the VPC is needed for the runtime to reach the neptune-graph interface endpoints and AWS APIs"
+          - id: W5
+            reason: "Egress is constrained to 443; broad destination is acceptable for an example that must reach AWS service endpoints"
+          - id: W60
+            reason: "VPC flow logs recommended for production but out of scope for this sample"
+    Properties:
+      GroupDescription: "ARIA-gv MCP server AgentCore Runtime ENIs"
+      VpcId: !Ref NeptuneVPC
+      SecurityGroupEgress:
+        - Description: "HTTPS egress to reach the neptune-graph endpoint and AWS APIs"
+          IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: aria
+          Value: agentcore-runtime-security-group
+        - Key: auto-delete
+          Value: "no"
+
+  # Allow the runtime SG to reach the neptune-graph interface endpoints on 443.
+  NeptuneEndpointIngressFromRuntime:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      Description: "Allow ARIA-gv MCP AgentCore Runtime to reach the neptune-graph endpoints"
+      GroupId: !Ref NeptuneAnalyticsSecurityGroup
+      IpProtocol: tcp
+      FromPort: 443
+      ToPort: 443
+      SourceSecurityGroupId: !Ref AgentCoreRuntimeSecurityGroup
+
+  # ---------------------------------------------------------------------------
+  # VPC endpoints required for a VPC-mode container runtime with no internet
+  # egress. Without these, AgentCore cannot pull the container image from ECR
+  # (via ECR + S3) or ship logs, so the runtime never becomes healthy. See
+  # https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/agentcore-vpc.html
+  # ---------------------------------------------------------------------------
+  RuntimeRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref NeptuneVPC
+      Tags:
+        - Key: aria
+          Value: agentcore-runtime-route-table
+        - Key: auto-delete
+          Value: "no"
+
+  RuntimeSubnet1RouteAssoc:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref RuntimeRouteTable
+      SubnetId: !Ref RuntimeSubnet1
+
+  RuntimeSubnet2RouteAssoc:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref RuntimeRouteTable
+      SubnetId: !Ref RuntimeSubnet2
+
+  # SG for the interface endpoints: allow HTTPS in from the runtime ENIs.
+  VpcEndpointSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W40
+            reason: "Explicit allow-all egress: interface-endpoint ENIs are reached inbound only, so unrestricted egress is intentional and harmless for this sample"
+          - id: W5
+            reason: "Explicit allow-all egress (0.0.0.0/0) is intentional for the interface-endpoint SG in this sample"
+          - id: W60
+            reason: "VPC flow logs recommended for production but out of scope for this sample"
+    Properties:
+      GroupDescription: "ARIA-gv MCP runtime interface VPC endpoints"
+      VpcId: !Ref NeptuneVPC
+      SecurityGroupIngress:
+        - Description: "HTTPS from the AgentCore runtime ENIs"
+          IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          SourceSecurityGroupId: !Ref AgentCoreRuntimeSecurityGroup
+      SecurityGroupEgress:
+        - Description: "Allow all outbound (explicit; matches the default). Endpoint ENIs are reached inbound only."
+          IpProtocol: "-1"
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: aria
+          Value: agentcore-vpce-security-group
+        - Key: auto-delete
+          Value: "no"
+
+  EcrApiEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      ServiceName: !Sub "com.amazonaws.${AWS::Region}.ecr.api"
+      VpcId: !Ref NeptuneVPC
+      VpcEndpointType: Interface
+      PrivateDnsEnabled: true
+      SubnetIds:
+        - !Ref RuntimeSubnet1
+        - !Ref RuntimeSubnet2
+      SecurityGroupIds:
+        - !Ref VpcEndpointSecurityGroup
+
+  EcrDkrEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      ServiceName: !Sub "com.amazonaws.${AWS::Region}.ecr.dkr"
+      VpcId: !Ref NeptuneVPC
+      VpcEndpointType: Interface
+      PrivateDnsEnabled: true
+      SubnetIds:
+        - !Ref RuntimeSubnet1
+        - !Ref RuntimeSubnet2
+      SecurityGroupIds:
+        - !Ref VpcEndpointSecurityGroup
+
+  LogsEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      ServiceName: !Sub "com.amazonaws.${AWS::Region}.logs"
+      VpcId: !Ref NeptuneVPC
+      VpcEndpointType: Interface
+      PrivateDnsEnabled: true
+      SubnetIds:
+        - !Ref RuntimeSubnet1
+        - !Ref RuntimeSubnet2
+      SecurityGroupIds:
+        - !Ref VpcEndpointSecurityGroup
+
+  # S3 gateway endpoint - ECR stores image layers in S3; free and required for
+  # image pull without internet egress. Attached to the runtime route table.
+  S3GatewayEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      ServiceName: !Sub "com.amazonaws.${AWS::Region}.s3"
+      VpcId: !Ref NeptuneVPC
+      VpcEndpointType: Gateway
+      RouteTableIds:
+        - !Ref RuntimeRouteTable
+
+  # ---------------------------------------------------------------------------
+  # Inbound auth: Cognito user pool with a machine-to-machine (client
+  # credentials) app client. AgentCore validates the JWT before the request
+  # reaches the container.
+  # ---------------------------------------------------------------------------
+  McpUserPool:
+    Type: AWS::Cognito::UserPool
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: F78
+            reason: "MFA is not applicable to a machine-to-machine (client_credentials) user pool with no human users"
+    Properties:
+      UserPoolName: !Sub "${AWS::StackName}-aria-gv-mcp"
+      AdminCreateUserConfig:
+        AllowAdminCreateUserOnly: true
+      Policies:
+        PasswordPolicy:
+          MinimumLength: 14
+          RequireUppercase: true
+          RequireLowercase: true
+          RequireNumbers: true
+          RequireSymbols: true
+      UserPoolTags:
+        aria: agentcore-cognito
+        auto-delete: "no"
+
+  McpResourceServer:
+    Type: AWS::Cognito::UserPoolResourceServer
+    Properties:
+      UserPoolId: !Ref McpUserPool
+      Identifier: "aria-gv-mcp"
+      Name: "ARIA-gv MCP"
+      Scopes:
+        - ScopeName: "invoke"
+          ScopeDescription: "Invoke the ARIA-gv MCP server"
+
+  McpUserPoolClient:
+    Type: AWS::Cognito::UserPoolClient
+    DependsOn: McpResourceServer
+    Properties:
+      ClientName: !Sub "${AWS::StackName}-aria-gv-mcp-client"
+      UserPoolId: !Ref McpUserPool
+      GenerateSecret: true
+      AllowedOAuthFlows:
+        - client_credentials
+      AllowedOAuthFlowsUserPoolClient: true
+      AllowedOAuthScopes:
+        - "aria-gv-mcp/invoke"
+      SupportedIdentityProviders:
+        - COGNITO
+      ExplicitAuthFlows:
+        - ALLOW_REFRESH_TOKEN_AUTH
+      PreventUserExistenceErrors: ENABLED
+      # Longer-lived access tokens reduce how often an MCP client must refresh.
+      AccessTokenValidity: !Ref AccessTokenValidityHours
+      TokenValidityUnits:
+        AccessToken: hours
+
+  McpUserPoolDomain:
+    Type: AWS::Cognito::UserPoolDomain
+    Properties:
+      UserPoolId: !Ref McpUserPool
+      Domain: !Sub
+        - "aria-gv-mcp-${Unique}"
+        - Unique: !Select [2, !Split ["/", !Ref AWS::StackId]]
+
+  # ---------------------------------------------------------------------------
+  # Execution role: least privilege. Read-only on the specific graph, plus the
+  # standard AgentCore Runtime permissions (ECR pull, logs, X-Ray, metrics,
+  # workload identity tokens).
+  # ---------------------------------------------------------------------------
+  AgentCoreExecutionRole:
+    Type: AWS::IAM::Role
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W11
+            reason: "ecr:GetAuthorizationToken, X-Ray, and cloudwatch:PutMetricData do not support resource-level permissions"
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: bedrock-agentcore.amazonaws.com
+            Action: sts:AssumeRole
+            Condition:
+              StringEquals:
+                aws:SourceAccount: !Ref AWS::AccountId
+              ArnLike:
+                aws:SourceArn: !Sub "arn:${AWS::Partition}:bedrock-agentcore:${AWS::Region}:${AWS::AccountId}:*"
+      Policies:
+        - PolicyName: NeptuneGraphReadOnly
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: ExecuteReadOnlyQueries
+                Effect: Allow
+                Action:
+                  - neptune-graph:ReadDataViaQuery
+                Resource: !Ref NeptuneGraphArn
+              - Sid: DiscoverGraph
+                Effect: Allow
+                Action:
+                  - neptune-graph:ListGraphs
+                  - neptune-graph:GetGraph
+                Resource: "*"
+        - PolicyName: AgentCoreRuntimeBaseline
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: EcrPull
+                Effect: Allow
+                Action:
+                  - ecr:BatchGetImage
+                  - ecr:GetDownloadUrlForLayer
+                Resource: !Sub "arn:${AWS::Partition}:ecr:${AWS::Region}:${AWS::AccountId}:repository/*"
+              - Sid: EcrAuth
+                Effect: Allow
+                Action:
+                  - ecr:GetAuthorizationToken
+                Resource: "*"
+              - Sid: Logs
+                Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                  - logs:DescribeLogStreams
+                  - logs:DescribeLogGroups
+                Resource: !Sub "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/bedrock-agentcore/runtimes/*"
+              - Sid: Observability
+                Effect: Allow
+                Action:
+                  - xray:PutTraceSegments
+                  - xray:PutTelemetryRecords
+                  - xray:GetSamplingRules
+                  - xray:GetSamplingTargets
+                Resource: "*"
+              - Sid: Metrics
+                Effect: Allow
+                Action:
+                  - cloudwatch:PutMetricData
+                Resource: "*"
+                Condition:
+                  StringEquals:
+                    cloudwatch:namespace: "bedrock-agentcore"
+              - Sid: WorkloadIdentity
+                Effect: Allow
+                Action:
+                  - bedrock-agentcore:GetWorkloadAccessToken
+                  - bedrock-agentcore:GetWorkloadAccessTokenForJWT
+                  - bedrock-agentcore:GetWorkloadAccessTokenForUserId
+                Resource:
+                  - !Sub "arn:${AWS::Partition}:bedrock-agentcore:${AWS::Region}:${AWS::AccountId}:workload-identity-directory/default"
+                  - !Sub "arn:${AWS::Partition}:bedrock-agentcore:${AWS::Region}:${AWS::AccountId}:workload-identity-directory/default/workload-identity/*"
+      Tags:
+        - Key: aria
+          Value: agentcore-execution-role
+        - Key: auto-delete
+          Value: "no"
+
+  # ---------------------------------------------------------------------------
+  # The AgentCore Runtime hosting the MCP server, in VPC mode.
+  # ---------------------------------------------------------------------------
+  McpRuntime:
+    Type: AWS::BedrockAgentCore::Runtime
+    Properties:
+      AgentRuntimeName: !Ref AgentRuntimeName
+      Description: "ARIA-gv identity access graph MCP server"
+      AgentRuntimeArtifact:
+        ContainerConfiguration:
+          ContainerUri: !Ref ContainerImageUri
+      RoleArn: !GetAtt AgentCoreExecutionRole.Arn
+      ProtocolConfiguration: "MCP"
+      NetworkConfiguration:
+        NetworkMode: "VPC"
+        NetworkModeConfig:
+          Subnets:
+            - !Ref RuntimeSubnet1
+            - !Ref RuntimeSubnet2
+          SecurityGroups:
+            - !Ref AgentCoreRuntimeSecurityGroup
+      AuthorizerConfiguration:
+        CustomJWTAuthorizer:
+          DiscoveryUrl: !Sub "https://cognito-idp.${AWS::Region}.amazonaws.com/${McpUserPool}/.well-known/openid-configuration"
+          AllowedClients:
+            - !Ref McpUserPoolClient
+      EnvironmentVariables:
+        ARIA_GRAPH_ID: !Ref NeptuneGraphId
+      Tags:
+        aria: agentcore-runtime
+        auto-delete: "no"
+
+Outputs:
+  McpRuntimeArn:
+    Description: "ARN of the AgentCore Runtime hosting the MCP server"
+    Value: !GetAtt McpRuntime.AgentRuntimeArn
+
+  McpRuntimeId:
+    Description: "AgentCore Runtime id"
+    Value: !GetAtt McpRuntime.AgentRuntimeId
+
+  CognitoUserPoolId:
+    Description: "Cognito user pool id (inbound JWT auth)"
+    Value: !Ref McpUserPool
+
+  CognitoAppClientId:
+    Description: "Cognito app client id - the client_id for the client_credentials grant"
+    Value: !Ref McpUserPoolClient
+
+  CognitoTokenEndpoint:
+    Description: "OAuth2 token endpoint for obtaining a bearer token"
+    Value: !Sub
+      - "https://${Domain}.auth.${AWS::Region}.amazoncognito.com/oauth2/token"
+      - Domain: !Ref McpUserPoolDomain
+
+  CognitoDiscoveryUrl:
+    Description: "OIDC discovery URL configured on the AgentCore JWT authorizer"
+    Value: !Sub "https://cognito-idp.${AWS::Region}.amazonaws.com/${McpUserPool}/.well-known/openid-configuration"
+
+  McpScope:
+    Description: "OAuth scope to request in the client_credentials grant"
+    Value: "aria-gv-mcp/invoke"

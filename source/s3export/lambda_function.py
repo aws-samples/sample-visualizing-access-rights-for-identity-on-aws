@@ -180,6 +180,9 @@ def lambda_handler(event, context):
         )
 
     # Export User to Accounts to csv file - EDGE
+    # The source table now holds one row per (user, account, permission set), so a
+    # user with several permission sets in an account yields multiple rows. Dedup on
+    # (UserId, AccountId) to emit a single User -> Account edge per pair.
     table_headers = ["UniqueId", "UserId", "AccountId", "Label"]
     csv_headers = ["~id", "~from", "~to", "~label"]
     export_dynamodb_to_s3(
@@ -189,10 +192,14 @@ def lambda_handler(event, context):
         table_headers, 
         csv_headers,
         generate_uuid=True,
-        label="ASSIGNED_ACCOUNT"
+        label="ASSIGNED_ACCOUNT",
+        dedup_fields=["UserId", "AccountId"]
         )
     
     # Export Groups to Accounts to csv file - EDGE
+    # The source table now holds one row per (group, account, permission set), so a
+    # group with several permission sets in an account yields multiple rows. Dedup on
+    # (GroupId, AccountId) to emit a single Group -> Account edge per pair.
     table_headers = ["UniqueId", "GroupId", "AccountId", "Label"]
     csv_headers = ["~id", "~from", "~to", "~label"]
     export_dynamodb_to_s3(
@@ -202,7 +209,8 @@ def lambda_handler(event, context):
         table_headers, 
         csv_headers,
         generate_uuid=True,
-        label="ASSIGNED_ACCOUNT"
+        label="ASSIGNED_ACCOUNT",
+        dedup_fields=["GroupId", "AccountId"]
         )
 
     # Export Account to PermissionSets to csv file - EDGE

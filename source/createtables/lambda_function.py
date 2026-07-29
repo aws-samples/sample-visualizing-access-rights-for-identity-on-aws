@@ -60,23 +60,29 @@ def create_tables(dynamodb):
             ]
         },
         'AriaIdCUserAccountAssignments': {
+            # Composite sort key UserPermissionSet ("UserId#PermissionSetArn") so a
+            # user with multiple permission sets in the same account is stored as
+            # distinct items rather than collapsing to one row per (user, account).
             'KeySchema': [
                 {'AttributeName': 'AccountId', 'KeyType': 'HASH'},
-                {'AttributeName': 'UserId', 'KeyType': 'RANGE'}
+                {'AttributeName': 'UserPermissionSet', 'KeyType': 'RANGE'}
             ],
             'AttributeDefinitions': [
                 {'AttributeName': 'AccountId', 'AttributeType': 'S'},
-                {'AttributeName': 'UserId', 'AttributeType': 'S'}
+                {'AttributeName': 'UserPermissionSet', 'AttributeType': 'S'}
             ]
         },
         'AriaIdCGroupAccountAssignments': {
+            # Composite sort key AccountPermissionSet ("AccountId#PermissionSetArn")
+            # so a group with multiple permission sets in the same account is stored
+            # as distinct items rather than collapsing to one row per (group, account).
             'KeySchema': [
                 {'AttributeName': 'GroupId', 'KeyType': 'HASH'},
-                {'AttributeName': 'AccountId', 'KeyType': 'RANGE'}
+                {'AttributeName': 'AccountPermissionSet', 'KeyType': 'RANGE'}
             ],
             'AttributeDefinitions': [
                 {'AttributeName': 'GroupId', 'AttributeType': 'S'},
-                {'AttributeName': 'AccountId', 'AttributeType': 'S'}
+                {'AttributeName': 'AccountPermissionSet', 'AttributeType': 'S'}
             ]
         },
         'AriaIdCIAMRoles': {

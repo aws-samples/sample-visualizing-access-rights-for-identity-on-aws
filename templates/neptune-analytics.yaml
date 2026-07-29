@@ -1,5 +1,5 @@
 AWSTemplateFormatVersion: "2010-09-09"
-Description: "CloudFormation template to deploy Neptune graph and notebook instance"
+Description: "CloudFormation template to deploy the Neptune Analytics graph, its VPC, and the graph export state machine"
 
 Parameters:
   AriaSetupStackName:
@@ -228,7 +228,8 @@ Resources:
       - AriaExportStateMachineRolePolicy
     Properties:
       Definition:
-        Comment: This state machine will export DynamoDB data to CSV in graph format and import data into a Neptune graph
+        Comment: This state machine exports DynamoDB data to CSV in graph format, resets the Neptune graph, imports the data, and polls the graph and import task status at each step instead of waiting a fixed time
+        TimeoutSeconds: 3600
         StartAt: S3 Export Lambda Function
         States:
           S3 Export Lambda Function:
@@ -255,11 +256,29 @@ Resources:
               GraphIdentifier: !GetAtt CreateNeptuneAnalytics.GraphId
               SkipSnapshot: "true"
             Resource: arn:aws:states:::aws-sdk:neptunegraph:resetGraph
-            Next: Wait
-          Wait:
+            Next: Wait For Graph Reset
+          Wait For Graph Reset:
             Type: Wait
-            Seconds: 120
-            Next: Start Neptune Import Task
+            Seconds: 15
+            Next: Get Graph Status
+          Get Graph Status:
+            Type: Task
+            Arguments:
+              GraphIdentifier: !GetAtt CreateNeptuneAnalytics.GraphId
+            Resource: arn:aws:states:::aws-sdk:neptunegraph:getGraph
+            Retry:
+              - ErrorEquals:
+                  - States.ALL
+                IntervalSeconds: 5
+                MaxAttempts: 3
+                BackoffRate: 2
+            Next: Is Graph Available
+          Is Graph Available:
+            Type: Choice
+            Choices:
+              - Condition: "{% $states.input.Status = 'AVAILABLE' %}"
+                Next: Start Neptune Import Task
+            Default: Wait For Graph Reset
           Start Neptune Import Task:
             Type: Task
             Resource: arn:aws:states:::aws-sdk:neptunegraph:startImportTask
@@ -268,11 +287,39 @@ Resources:
               RoleArn: !GetAtt CreateNeptuneLoadRole.Arn
               Source: !Sub "s3://${S3ExportBucketName}/"
               Format: CSV
-            Next: Wait2
-          Wait2:
+            Assign:
+              importTaskId: "{% $states.result.TaskId %}"
+            Next: Wait For Import
+          Wait For Import:
             Type: Wait
-            Seconds: 180
-            End: true
+            Seconds: 30
+            Next: Get Import Task Status
+          Get Import Task Status:
+            Type: Task
+            Arguments:
+              TaskIdentifier: "{% $importTaskId %}"
+            Resource: arn:aws:states:::aws-sdk:neptunegraph:getImportTask
+            Retry:
+              - ErrorEquals:
+                  - States.ALL
+                IntervalSeconds: 5
+                MaxAttempts: 3
+                BackoffRate: 2
+            Next: Is Import Complete
+          Is Import Complete:
+            Type: Choice
+            Choices:
+              - Condition: "{% $states.input.Status = 'SUCCEEDED' %}"
+                Next: Import Succeeded
+              - Condition: "{% $states.input.Status in ['FAILED', 'CANCELLED', 'CANCELLING', 'ROLLING_BACK'] %}"
+                Next: Import Failed
+            Default: Wait For Import
+          Import Succeeded:
+            Type: Succeed
+          Import Failed:
+            Type: Fail
+            Error: NeptuneImportFailed
+            Cause: The Neptune Analytics import task did not reach SUCCEEDED status.
         QueryLanguage: JSONata
       RoleArn: !GetAtt AriaExportStateMachineRole.Arn
       StateMachineName: AriaExportGraphStateMachine
@@ -315,6 +362,8 @@ Resources:
               - neptune-graph:ResetGraph
               - neptune-graph:StartImportTask
               - neptune-graph:CreateGraphSnapshot
+              - neptune-graph:GetGraph
+              - neptune-graph:GetImportTask
             Resource: "*"
           - Effect: Allow
             Action:

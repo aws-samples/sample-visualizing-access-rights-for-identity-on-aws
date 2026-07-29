@@ -9,7 +9,13 @@ set -e
 STACK_NAME="aria-gv-setup"
 REGION="us-east-1"
 DEPLOY_NEPTUNE="true"
+DEPLOY_NEPTUNE_NOTEBOOK="true"
 PUBLIC_IP="0.0.0.0/0"
+
+# MCP Server (AgentCore) Configuration
+DEPLOY_MCP_SERVER="false"
+MCP_CONTAINER_IMAGE_URI=""
+MCP_AGENT_RUNTIME_NAME="aria_gv_mcp"
 
 # Data Collection Scheduling Configuration
 ENABLE_DATA_COLLECTION_SCHEDULING="false"
@@ -129,6 +135,34 @@ validate_scheduling_parameters() {
     fi
     
     echo_info "Scheduling parameters validated successfully"
+
+    # Validate Neptune notebook parameters
+    if [[ "$DEPLOY_NEPTUNE_NOTEBOOK" != "true" && "$DEPLOY_NEPTUNE_NOTEBOOK" != "false" ]]; then
+        echo_error "Invalid value for --deploy-neptune-notebook: $DEPLOY_NEPTUNE_NOTEBOOK (must be 'true' or 'false')"
+        exit 1
+    fi
+    if [[ "$DEPLOY_NEPTUNE_NOTEBOOK" == "true" && "$DEPLOY_NEPTUNE" != "true" ]]; then
+        echo_error "--deploy-neptune-notebook true requires --deploy-neptune true (the notebook connects to the Neptune graph)"
+        exit 1
+    fi
+
+    # Validate MCP server parameters
+    if [[ "$DEPLOY_MCP_SERVER" != "true" && "$DEPLOY_MCP_SERVER" != "false" ]]; then
+        echo_error "Invalid value for --deploy-mcp-server: $DEPLOY_MCP_SERVER (must be 'true' or 'false')"
+        exit 1
+    fi
+    if [[ "$DEPLOY_MCP_SERVER" == "true" ]]; then
+        if [[ "$DEPLOY_NEPTUNE" != "true" ]]; then
+            echo_error "--deploy-mcp-server true requires --deploy-neptune true (the MCP server queries the Neptune graph)"
+            exit 1
+        fi
+        if [[ -z "$MCP_CONTAINER_IMAGE_URI" ]]; then
+            echo_error "--deploy-mcp-server true requires --mcp-container-image-uri <ECR image URI>"
+            echo_error "Build and push the image first: cd mcp-server && ./build-and-push.sh -r $REGION"
+            exit 1
+        fi
+        echo_info "MCP server parameters validated successfully"
+    fi
 }
 
 # Function to deploy CloudFormation stack
@@ -151,6 +185,7 @@ deploy_stack() {
         --parameters \
             ParameterKey=TemplatesBucketName,ParameterValue="$TEMPLATES_BUCKET" \
             ParameterKey=DeployNeptune,ParameterValue="$DEPLOY_NEPTUNE" \
+            ParameterKey=DeployNeptuneNotebook,ParameterValue="$DEPLOY_NEPTUNE_NOTEBOOK" \
             ParameterKey=PublicIPAddress,ParameterValue="$PUBLIC_IP" \
             ParameterKey=EnableDataCollectionScheduling,ParameterValue="$ENABLE_DATA_COLLECTION_SCHEDULING" \
             ParameterKey=DataCollectionScheduleExpression,ParameterValue="$DATA_COLLECTION_SCHEDULE_EXPRESSION" \
@@ -161,6 +196,9 @@ deploy_stack() {
             ParameterKey=ScheduleDescription,ParameterValue="$GRAPH_EXPORT_SCHEDULE_DESCRIPTION" \
             ParameterKey=ScheduleTimezone,ParameterValue="$GRAPH_EXPORT_SCHEDULE_TIMEZONE" \
             ParameterKey=ManagementAccountId,ParameterValue="$MANAGEMENT_ACCOUNT_ID" \
+            ParameterKey=DeployMcpServer,ParameterValue="$DEPLOY_MCP_SERVER" \
+            ParameterKey=McpContainerImageUri,ParameterValue="$MCP_CONTAINER_IMAGE_URI" \
+            ParameterKey=McpAgentRuntimeName,ParameterValue="$MCP_AGENT_RUNTIME_NAME" \
         --capabilities CAPABILITY_IAM > /dev/null 2>&1
     
     echo_info "Stack deployment initiated. Waiting for completion..."
@@ -289,8 +327,14 @@ main() {
     echo_info "Stack Name: $STACK_NAME"
     echo_info "Templates Bucket: $TEMPLATES_BUCKET"
     echo_info "Region: $REGION"
-    echo_info "Deploy Neptune: $DEPLOY_NEPTUNE"
+    echo_info "Deploy Neptune Graph: $DEPLOY_NEPTUNE"
+    echo_info "Deploy Neptune Notebook: $DEPLOY_NEPTUNE_NOTEBOOK"
     echo_info "Public IP: $PUBLIC_IP"
+    echo_info "Deploy MCP Server (AgentCore): $DEPLOY_MCP_SERVER"
+    if [[ "$DEPLOY_MCP_SERVER" == "true" ]]; then
+        echo_info "  MCP Container Image: $MCP_CONTAINER_IMAGE_URI"
+        echo_info "  MCP Runtime Name: $MCP_AGENT_RUNTIME_NAME"
+    fi
     echo ""
     echo_info "Data Collection and Export Scheduling Configuration:"
     echo_info "  Enable Data Collection and Export Scheduling: $ENABLE_DATA_COLLECTION_SCHEDULING"
@@ -348,6 +392,10 @@ while [[ $# -gt 0 ]]; do
             DEPLOY_NEPTUNE="$2"
             shift 2
             ;;
+        --deploy-neptune-notebook)
+            DEPLOY_NEPTUNE_NOTEBOOK="$2"
+            shift 2
+            ;;
         --public-ip)
             PUBLIC_IP="$2"
             shift 2
@@ -388,6 +436,18 @@ while [[ $# -gt 0 ]]; do
             set_scheduling_preset "$2"
             shift 2
             ;;
+        --deploy-mcp-server)
+            DEPLOY_MCP_SERVER="$2"
+            shift 2
+            ;;
+        --mcp-container-image-uri)
+            MCP_CONTAINER_IMAGE_URI="$2"
+            shift 2
+            ;;
+        --mcp-agent-runtime-name)
+            MCP_AGENT_RUNTIME_NAME="$2"
+            shift 2
+            ;;
         --help)
             echo "Usage: $0 [OPTIONS]"
             echo ""
@@ -396,7 +456,10 @@ while [[ $# -gt 0 ]]; do
             echo "  --templates-bucket BUCKET_NAME    S3 bucket for templates (default: auto-generated unique name)"
             echo "                                    Note: Bucket names are automatically generated per account and stored in SSM"
             echo "  --region REGION                   AWS region (default: us-east-1)"
-            echo "  --deploy-neptune true|false       Deploy Neptune Analytics and Notebook (default: true)"
+            echo "  --deploy-neptune true|false       Deploy the Neptune Analytics graph (default: true)"
+            echo "  --deploy-neptune-notebook true|false"
+            echo "                                    Deploy the Neptune notebook and Graph Explorer (default: true)."
+            echo "                                    Requires --deploy-neptune true."
             echo "  --public-ip CIDR                  Public IP address in CIDR format (default: 0.0.0.0/0)"
             echo ""
             echo "Data Collection Scheduling Options:"
@@ -426,6 +489,14 @@ while [[ $# -gt 0 ]]; do
             echo "                                      frequent-collection-daily-export"
             echo "                                      business-hours"
             echo "                                      disabled"
+            echo ""
+            echo "MCP Server (AgentCore) Options:"
+            echo "  --deploy-mcp-server true|false    Host the ARIA-gv MCP server on Bedrock AgentCore"
+            echo "                                    Runtime (default: false). Requires --deploy-neptune true"
+            echo "                                    and --mcp-container-image-uri."
+            echo "  --mcp-container-image-uri URI     ECR image URI (with tag) of the ARM64 MCP server image."
+            echo "                                    Build it first: cd mcp-server && ./build-and-push.sh"
+            echo "  --mcp-agent-runtime-name NAME     AgentCore Runtime name (default: aria_gv_mcp)"
             echo ""
             echo "Other Options:"
             echo "  --help                            Show this help message"
