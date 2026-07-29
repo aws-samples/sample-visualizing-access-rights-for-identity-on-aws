@@ -1,81 +1,81 @@
-AWSTemplateFormatVersion: '2010-09-09'
-Description: 'Main CloudFormation template for Workforce Identity Visualization - orchestrates nested stacks (uksb-zilgml23n9)'
+AWSTemplateFormatVersion: "2010-09-09"
+Description: "Main CloudFormation template for Workforce Identity Visualization - orchestrates nested stacks (uksb-zilgml23n9)"
 
 Parameters:
   S3SourceBucketName:
     Type: AWS::SSM::Parameter::Value<String>
     Description: Name of the SSM parameter containing the S3 bucket with all Lambda function source code
-    Default: 'aria-source-bucket'
+    Default: "aria-source-bucket"
 
   S3ExportBucketName:
     Type: AWS::SSM::Parameter::Value<String>
     Description: Name of the SSM parameter containing the S3 bucket to export all data to
-    Default: 'aria-export-bucket'
-    
+    Default: "aria-export-bucket"
+
   CreateTablesS3Key:
     Type: String
     Description: S3 key (path) to the CreateTables Lambda function code zip file
-    Default: 'createtables.zip'
-  
+    Default: "createtables.zip"
+
   ListUsersS3Key:
     Type: String
     Description: S3 key (path) to the ListUsers Lambda function code zip file
-    Default: 'listusers.zip'
+    Default: "listusers.zip"
 
   ListGroupsS3Key:
     Type: String
     Description: S3 key (path) to the ListGroups Lambda function code zip file
-    Default: 'listgroups.zip'
+    Default: "listgroups.zip"
 
   ListGroupMembershipS3Key:
     Type: String
     Description: S3 key (path) to the ListGroupMembership Lambda function code zip file
-    Default: 'listgroupmembership.zip'
+    Default: "listgroupmembership.zip"
 
   ListPermissionSetsS3Key:
     Type: String
     Description: S3 key (path) to the ListPermissionSets Lambda function code zip file
-    Default: 'listpermissionsets.zip'
+    Default: "listpermissionsets.zip"
 
   ListProvisionedPermissionSetsS3Key:
     Type: String
     Description: S3 key (path) to the ListProvisionedPermissionSets Lambda function code zip file
-    Default: 'listprovisionedpermissionsets.zip'
+    Default: "listprovisionedpermissionsets.zip"
 
   ListAccountsS3Key:
     Type: String
     Description: S3 key (path) to the ListAccounts Lambda function code zip file
-    Default: 'listaccounts.zip'
+    Default: "listaccounts.zip"
 
   ListUserAccountAssignmentsS3Key:
     Type: String
     Description: S3 key (path) to the ListUserAccountAssignments Lambda function code zip file
-    Default: 'listuseraccountassignments.zip'
+    Default: "listuseraccountassignments.zip"
 
   ListGroupAccountAssignmentsS3Key:
     Type: String
     Description: S3 key (path) to the ListGroupAccountAssignments Lambda function code zip file
-    Default: 'listgroupaccountassignments.zip'
+    Default: "listgroupaccountassignments.zip"
 
   GetIAMRolesS3Key:
     Type: String
     Description: S3 key (path) to the GetIAMRoles Lambda function code zip file
-    Default: 'getiamroles.zip'
-  
+    Default: "getiamroles.zip"
+
   S3ExportS3Key:
     Type: String
     Description: S3 key (path) to the S3Export Lambda function code zip file
-    Default: 's3export.zip'
-  
+    Default: "s3export.zip"
+
   AccessAnalyzerFindingIngestionS3Key:
     Type: String
     Description: S3 key (path) to the AccessAnalyzerFindingIngestion Lambda function code zip file
-    Default: 'accessanalyzerfindingingestion.zip'
+    Default: "accessanalyzerfindingingestion.zip"
 
   UpdateFunctionCodeS3Key:
     Type: String
     Description: S3 key (path) to the UpdateFunctionCode Lambda function code zip file
-    Default: 'updatefunctioncode.zip'
+    Default: "updatefunctioncode.zip"
 
   PythonHandler:
     Type: String
@@ -85,18 +85,18 @@ Parameters:
   TemplatesBucketName:
     Type: String
     Description: S3 bucket containing nested CloudFormation templates
-    Default: 'aria-templates-bucket'
+    Default: "aria-templates-bucket"
 
   # Neptune Analytics Parameters
   GraphName:
     Type: String
-    Description: 'Name of the Neptune graph'
-    Default: 'aria-identitycenter'
+    Description: "Name of the Neptune graph"
+    Default: "aria-identitycenter"
 
   PublicIPAddress:
     Type: String
     Description: Provide your public IP address in CIDR format e.g. 1.2.3.4/32
-    Default: '0.0.0.0/0'
+    Default: "0.0.0.0/0"
 
   # Neptune Notebook Parameters
   NotebookInstanceType:
@@ -126,85 +126,87 @@ Parameters:
   NotebookName:
     Type: String
     Description: Name for the notebook instance
-    Default: 'Aria-Jupyter-Notebook'
+    Default: "Aria-Jupyter-Notebook"
     MaxLength: 38
 
   DeployNeptune:
     Type: String
     Description: Whether to deploy Neptune Analytics and Notebook
-    Default: 'true'
+    Default: "true"
     AllowedValues:
-      - 'true'
-      - 'false'
+      - "true"
+      - "false"
 
   # Scheduling Parameters
   EnableScheduling:
     Type: String
     Description: Enable automatic scheduling of the AriaExportGraphStateMachine
-    Default: 'false'
+    Default: "false"
     AllowedValues:
-      - 'true'
-      - 'false'
+      - "true"
+      - "false"
 
   ScheduleExpression:
     Type: String
-    Description: 'Schedule expression for automatic execution (e.g., rate(1 day), cron(0 2 * * ? *))'
-    Default: 'rate(1 day)'
+    Description: "Schedule expression for automatic execution (e.g., rate(1 day), cron(0 2 * * ? *))"
+    Default: "rate(1 day)"
 
   ScheduleDescription:
     Type: String
-    Description: 'Description for the scheduled execution'
-    Default: 'Daily execution of ARIA graph export and import'
+    Description: "Description for the scheduled execution"
+    Default: "Daily execution of ARIA graph export and import"
 
   ScheduleTimezone:
     Type: String
-    Description: 'Timezone for cron-based schedules (e.g., America/New_York, UTC)'
-    Default: 'UTC'
+    Description: "Timezone for cron-based schedules (e.g., America/New_York, UTC)"
+    Default: "UTC"
 
   # Data Collection Scheduling Parameters
   EnableDataCollectionScheduling:
     Type: String
     Description: Enable automatic scheduling of the AriaStateMachine for data collection
-    Default: 'false'
+    Default: "false"
     AllowedValues:
-      - 'true'
-      - 'false'
+      - "true"
+      - "false"
 
   DataCollectionScheduleExpression:
     Type: String
-    Description: 'Schedule expression for automatic data collection (e.g., rate(6 hours), cron(0 */6 * * ? *))'
-    Default: 'rate(6 hours)'
+    Description: "Schedule expression for automatic data collection (e.g., rate(6 hours), cron(0 */6 * * ? *))"
+    Default: "rate(6 hours)"
 
   DataCollectionScheduleDescription:
     Type: String
-    Description: 'Description for the scheduled data collection execution'
-    Default: 'Automated ARIA identity data collection every 6 hours'
+    Description: "Description for the scheduled data collection execution"
+    Default: "Automated ARIA identity data collection every 6 hours"
 
   DataCollectionScheduleTimezone:
     Type: String
-    Description: 'Timezone for cron-based schedules (e.g., America/New_York, UTC)'
-    Default: 'UTC'
+    Description: "Timezone for cron-based schedules (e.g., America/New_York, UTC)"
+    Default: "UTC"
+
+  ManagementAccountId:
+    Type: String
+    Description: "AWS Account ID of the Organizations management account (for KMS key access)"
 
 Conditions:
-  ShouldDeployNeptune: !Equals [!Ref DeployNeptune, 'true']
+  ShouldDeployNeptune: !Equals [!Ref DeployNeptune, "true"]
   ShouldDeployNeptuneWithScheduling: !And
-    - !Equals [!Ref DeployNeptune, 'true']
-    - !Equals [!Ref EnableScheduling, 'true']
+    - !Equals [!Ref DeployNeptune, "true"]
+    - !Equals [!Ref EnableScheduling, "true"]
 
-Metadata: 
-  AWS::CloudFormation::Interface: 
+Metadata:
+  AWS::CloudFormation::Interface:
     ParameterGroups:
-      - 
-        Label: 
+      - Label:
           default: "S3 Bucket SSM Parameters"
         Parameters:
           - S3SourceBucketName
           - S3ExportBucketName
           - TemplatesBucketName
-      - 
-        Label: 
+      - Label:
           default: "Lambda Functions"
-        Parameters: 
+        Parameters:
           - CreateTablesS3Key
           - ListUsersS3Key
           - ListGroupsS3Key
@@ -218,34 +220,29 @@ Metadata:
           - S3ExportS3Key
           - AccessAnalyzerFindingIngestionS3Key
           - UpdateFunctionCodeS3Key
-      - 
-        Label: 
+      - Label:
           default: "Python Handler"
         Parameters:
           - PythonHandler
-      - 
-        Label: 
+      - Label:
           default: "Neptune Analytics"
         Parameters:
           - DeployNeptune
           - GraphName
           - PublicIPAddress
-      - 
-        Label: 
+      - Label:
           default: "Neptune Notebook"
         Parameters:
           - NotebookInstanceType
           - NotebookName
-      - 
-        Label: 
+      - Label:
           default: "Graph Export Scheduling"
         Parameters:
           - EnableScheduling
           - ScheduleExpression
           - ScheduleDescription
           - ScheduleTimezone
-      - 
-        Label: 
+      - Label:
           default: "Data Collection Scheduling"
         Parameters:
           - EnableDataCollectionScheduling
@@ -260,7 +257,7 @@ Resources:
     DeletionPolicy: Delete
     UpdateReplacePolicy: Delete
     Properties:
-      TemplateURL: !Sub 'https://${TemplatesBucketName}.s3.${AWS::Region}.amazonaws.com/lambda-functions.yaml'
+      TemplateURL: !Sub "https://${TemplatesBucketName}.s3.${AWS::Region}.amazonaws.com/lambda-functions.yaml"
       Parameters:
         S3SourceBucketName: !Ref S3SourceBucketName
         S3ExportBucketName: !Ref S3ExportBucketName
@@ -279,9 +276,12 @@ Resources:
         UpdateFunctionCodeS3Key: !Ref UpdateFunctionCodeS3Key
         PythonHandler: !Ref PythonHandler
         StackName: !Ref AWS::StackName
+        ManagementAccountId: !Ref ManagementAccountId
       Tags:
         - Key: aria
           Value: nested-stack
+        - Key: auto-delete
+          Value: "no"
 
   # SSM Parameters Stack
   SSMStack:
@@ -289,7 +289,7 @@ Resources:
     DeletionPolicy: Delete
     UpdateReplacePolicy: Delete
     Properties:
-      TemplateURL: !Sub 'https://${TemplatesBucketName}.s3.${AWS::Region}.amazonaws.com/ssm-stack.yaml'
+      TemplateURL: !Sub "https://${TemplatesBucketName}.s3.${AWS::Region}.amazonaws.com/ssm-stack.yaml"
       Parameters:
         CreateTablesS3Key: !Ref CreateTablesS3Key
         ListUsersS3Key: !Ref ListUsersS3Key
@@ -320,6 +320,8 @@ Resources:
       Tags:
         - Key: aria
           Value: nested-stack
+        - Key: auto-delete
+          Value: "no"
 
   # EventBridge Stack
   EventBridgeStack:
@@ -327,7 +329,7 @@ Resources:
     DeletionPolicy: Delete
     UpdateReplacePolicy: Delete
     Properties:
-      TemplateURL: !Sub 'https://${TemplatesBucketName}.s3.${AWS::Region}.amazonaws.com/eventbridge-stack.yaml'
+      TemplateURL: !Sub "https://${TemplatesBucketName}.s3.${AWS::Region}.amazonaws.com/eventbridge-stack.yaml"
       Parameters:
         S3SourceBucketName: !Ref S3SourceBucketName
         UpdateFunctionCodeLambdaArn: !GetAtt LambdaStack.Outputs.UpdateFunctionCodeLambdaArn
@@ -336,6 +338,8 @@ Resources:
       Tags:
         - Key: aria
           Value: nested-stack
+        - Key: auto-delete
+          Value: "no"
 
   # Step Functions Stack
   StepFunctionsStack:
@@ -343,7 +347,7 @@ Resources:
     DeletionPolicy: Delete
     UpdateReplacePolicy: Delete
     Properties:
-      TemplateURL: !Sub 'https://${TemplatesBucketName}.s3.${AWS::Region}.amazonaws.com/step-functions.yaml'
+      TemplateURL: !Sub "https://${TemplatesBucketName}.s3.${AWS::Region}.amazonaws.com/step-functions.yaml"
       Parameters:
         CreateTablesLambdaArn: !GetAtt LambdaStack.Outputs.CreateTablesLambdaArn
         ListUsersLambdaArn: !GetAtt LambdaStack.Outputs.ListUsersLambdaArn
@@ -362,6 +366,8 @@ Resources:
       Tags:
         - Key: aria
           Value: nested-stack
+        - Key: auto-delete
+          Value: "no"
 
   # Neptune Analytics Stack
   NeptuneAnalyticsStack:
@@ -370,7 +376,7 @@ Resources:
     DeletionPolicy: Delete
     UpdateReplacePolicy: Delete
     Properties:
-      TemplateURL: !Sub 'https://${TemplatesBucketName}.s3.${AWS::Region}.amazonaws.com/neptune-analytics.yaml'
+      TemplateURL: !Sub "https://${TemplatesBucketName}.s3.${AWS::Region}.amazonaws.com/neptune-analytics.yaml"
       Parameters:
         AriaSetupStackName: !Ref AWS::StackName
         S3ExportBucketName: !Ref S3ExportBucketName
@@ -384,6 +390,8 @@ Resources:
       Tags:
         - Key: aria
           Value: nested-stack
+        - Key: auto-delete
+          Value: "no"
 
   # Neptune Notebook Stack
   NeptuneNotebookStack:
@@ -392,11 +400,11 @@ Resources:
     DeletionPolicy: Delete
     UpdateReplacePolicy: Delete
     Properties:
-      TemplateURL: !Sub 'https://${TemplatesBucketName}.s3.${AWS::Region}.amazonaws.com/neptune-notebook.yaml'
+      TemplateURL: !Sub "https://${TemplatesBucketName}.s3.${AWS::Region}.amazonaws.com/neptune-notebook.yaml"
       Parameters:
         NotebookInstanceType: !Ref NotebookInstanceType
         NotebookName: !Ref NotebookName
-        GraphPort: '8182'
+        GraphPort: "8182"
         GraphVPC: !GetAtt NeptuneAnalyticsStack.Outputs.NeptuneVPC
         GraphSubnet: !GetAtt NeptuneAnalyticsStack.Outputs.NeptunePrivateSubnet1
         GraphSecurityGroup: !GetAtt NeptuneAnalyticsStack.Outputs.NeptuneAnalyticsSecurityGroup
@@ -406,73 +414,75 @@ Resources:
       Tags:
         - Key: aria
           Value: nested-stack
+        - Key: auto-delete
+          Value: "no"
 
 Outputs:
   GetIAMRolesLambdaFunctionArn:
-    Description: 'ARN of the GetIAMRoles Lambda function'
+    Description: "ARN of the GetIAMRoles Lambda function"
     Value: !GetAtt LambdaStack.Outputs.GetIAMRolesLambdaArn
   GetIAMRolesLambdaFunctionName:
-    Description: 'Name of the GetIAMRoles Lambda function'
+    Description: "Name of the GetIAMRoles Lambda function"
     Value: !GetAtt LambdaStack.Outputs.GetIAMRolesLambdaName
   GetIAMRolesLambdaFunctionExecutionRoleArn:
     Description: ARN of IAM role created for GetIAMRoles Lambda function
     Value: !GetAtt LambdaStack.Outputs.GetIAMRolesLambdaExecutionRoleArn
   S3ExportLambdaFunctionArn:
-    Description: 'ARN of the S3Export Lambda function'
+    Description: "ARN of the S3Export Lambda function"
     Value: !GetAtt LambdaStack.Outputs.S3ExportLambdaArn
     Export:
-      Name: 
+      Name:
         Fn::Sub: ${AWS::StackName}-S3ExportLambdaFunctionArn
   S3ExportBucketName:
-    Description: 'Name of the S3 Export Bucket'
+    Description: "Name of the S3 Export Bucket"
     Value: !Ref S3ExportBucketName
     Export:
       Name:
         Fn::Sub: ${AWS::StackName}-S3ExportBucketName
   StackName:
-    Description: 'The stack name'
-    Value: !Sub '${AWS::StackName}'
+    Description: "The stack name"
+    Value: !Sub "${AWS::StackName}"
     Export:
-      Name: 'Aria-setup-stackname'
+      Name: "Aria-setup-stackname"
   NeptuneGraphEndpoint:
     Condition: ShouldDeployNeptune
-    Description: 'Neptune Analytics Graph Endpoint'
+    Description: "Neptune Analytics Graph Endpoint"
     Value: !GetAtt NeptuneAnalyticsStack.Outputs.NeptuneGraphEndpoint
   NeptuneGraphId:
     Condition: ShouldDeployNeptune
-    Description: 'Neptune Analytics Graph ID'
+    Description: "Neptune Analytics Graph ID"
     Value: !GetAtt NeptuneAnalyticsStack.Outputs.NeptuneGraphId
   NeptuneNotebookURL:
     Condition: ShouldDeployNeptune
-    Description: 'Neptune Analytics Notebook URL'
+    Description: "Neptune Analytics Notebook URL"
     Value: !GetAtt NeptuneNotebookStack.Outputs.NeptuneAnalyticsSagemakerNotebook
-  
+
   # Graph Export Scheduling Outputs (only available when Neptune is deployed and scheduling is enabled)
   AriaExportGraphStateMachineArn:
     Condition: ShouldDeployNeptune
-    Description: 'ARN of the AriaExportGraphStateMachine'
+    Description: "ARN of the AriaExportGraphStateMachine"
     Value: !GetAtt NeptuneAnalyticsStack.Outputs.AriaExportGraphStateMachineArn
   GraphExportSchedulingEnabled:
     Condition: ShouldDeployNeptune
-    Description: 'Whether scheduling is enabled for the AriaExportGraphStateMachine'
+    Description: "Whether scheduling is enabled for the AriaExportGraphStateMachine"
     Value: !GetAtt NeptuneAnalyticsStack.Outputs.GraphExportSchedulingEnabled
   GraphExportScheduleExpression:
     Condition: ShouldDeployNeptuneWithScheduling
-    Description: 'Schedule expression for the AriaExportGraphStateMachine (if enabled)'
+    Description: "Schedule expression for the AriaExportGraphStateMachine (if enabled)"
     Value: !Ref ScheduleExpression
-  
+
   GraphExportTriggerRule:
     Condition: ShouldDeployNeptuneWithScheduling
-    Description: 'EventBridge Rule that triggers graph export after data collection completes'
+    Description: "EventBridge Rule that triggers graph export after data collection completes"
     Value: !GetAtt NeptuneAnalyticsStack.Outputs.GraphExportTriggerRuleName
-  
+
   # Data Collection Scheduling Outputs
   AriaStateMachineArn:
-    Description: 'ARN of the AriaStateMachine for data collection'
+    Description: "ARN of the AriaStateMachine for data collection"
     Value: !GetAtt StepFunctionsStack.Outputs.StateMachineArn
   DataCollectionSchedulingEnabled:
-    Description: 'Whether scheduling is enabled for the AriaStateMachine data collection'
+    Description: "Whether scheduling is enabled for the AriaStateMachine data collection"
     Value: !GetAtt StepFunctionsStack.Outputs.DataCollectionSchedulingEnabled
   DataCollectionScheduleExpression:
-    Description: 'Schedule expression for the AriaStateMachine data collection (if enabled)'
+    Description: "Schedule expression for the AriaStateMachine data collection (if enabled)"
     Value: !Ref DataCollectionScheduleExpression

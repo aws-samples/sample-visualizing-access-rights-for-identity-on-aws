@@ -41,6 +41,8 @@ Resources:
       Tags:
         - Key: aria
           Value: dynamodb-table
+        - Key: auto-delete
+          Value: "no"
 
   AriaIdCGroupsTable:
     Type: AWS::DynamoDB::Table
@@ -75,6 +77,8 @@ Resources:
       Tags:
         - Key: aria
           Value: dynamodb-table
+        - Key: auto-delete
+          Value: "no"
 
   AriaIdCGroupMembershipTable:
     Type: AWS::DynamoDB::Table
@@ -109,6 +113,8 @@ Resources:
       Tags:
         - Key: aria
           Value: dynamodb-table
+        - Key: auto-delete
+          Value: "no"
 
   AriaIdCPermissionSetsTable:
     Type: AWS::DynamoDB::Table
@@ -143,6 +149,8 @@ Resources:
       Tags:
         - Key: aria
           Value: dynamodb-table
+        - Key: auto-delete
+          Value: "no"
 
   AriaIdCProvisionedPermissionSetsTable:
     Type: AWS::DynamoDB::Table
@@ -177,6 +185,8 @@ Resources:
       Tags:
         - Key: aria
           Value: dynamodb-table
+        - Key: auto-delete
+          Value: "no"
 
   AriaIdCAccountsTable:
     Type: AWS::DynamoDB::Table
@@ -211,6 +221,8 @@ Resources:
       Tags:
         - Key: aria
           Value: dynamodb-table
+        - Key: auto-delete
+          Value: "no"
 
   AriaIdCUserAccountAssignmentsTable:
     Type: AWS::DynamoDB::Table
@@ -245,6 +257,8 @@ Resources:
       Tags:
         - Key: aria
           Value: dynamodb-table
+        - Key: auto-delete
+          Value: "no"
 
   AriaIdCGroupAccountAssignmentsTable:
     Type: AWS::DynamoDB::Table
@@ -279,6 +293,8 @@ Resources:
       Tags:
         - Key: aria
           Value: dynamodb-table
+        - Key: auto-delete
+          Value: "no"
 
   AriaIdCIAMRolesTable:
     Type: AWS::DynamoDB::Table
@@ -313,6 +329,8 @@ Resources:
       Tags:
         - Key: aria
           Value: dynamodb-table
+        - Key: auto-delete
+          Value: "no"
 
   AriaIdCAccessAnalyzerFindingsTable:
     Type: AWS::DynamoDB::Table
@@ -347,6 +365,8 @@ Resources:
       Tags:
         - Key: aria
           Value: dynamodb-table
+        - Key: auto-delete
+          Value: "no"
 
 Outputs:
   UsersTableName:

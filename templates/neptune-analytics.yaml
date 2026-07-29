@@ -60,6 +60,8 @@ Resources:
       Tags:
         - Key: aria
           Value: vpc
+        - Key: auto-delete
+          Value: "no"
 
   # Subnets
   NeptunePrivateSubnet1:
@@ -71,6 +73,8 @@ Resources:
       Tags:
         - Key: aria
           Value: private-subnet-1
+        - Key: auto-delete
+          Value: "no"
 
   NeptunePrivateSubnet2:
     Type: AWS::EC2::Subnet
@@ -81,6 +85,8 @@ Resources:
       Tags:
         - Key: aria
           Value: private-subnet-2
+        - Key: auto-delete
+          Value: "no"
 
   # Security Group
   NeptuneAnalyticsSecurityGroup:
@@ -113,6 +119,8 @@ Resources:
       Tags:
         - Key: aria
           Value: neptune-analytics-security-group
+        - Key: auto-delete
+          Value: "no"
 
   # VPC Endpoints - Neptune Control Plane
   NeptuneAnalyticsVPCEndpoint:
@@ -130,6 +138,8 @@ Resources:
       Tags:
         - Key: aria
           Value: neptune-analytics-vpc-graph-endpoint
+        - Key: auto-delete
+          Value: "no"
 
   # VPC Endpoints - Neptune Data Plane
   NeptuneAnalyticsVPCDataEndpoint:
@@ -147,6 +157,8 @@ Resources:
       Tags:
         - Key: aria
           Value: neptune-analytics-vpc-graph-data-endpoint
+        - Key: auto-delete
+          Value: "no"
       PolicyDocument:
         Version: "2012-10-17"
         Statement:
@@ -173,6 +185,8 @@ Resources:
       Tags:
         - Key: aria
           Value: role
+        - Key: auto-delete
+          Value: "no"
 
   CreateNeptuneAnalytics: #Create Neptune Analytics Graph
     Type: "AWS::NeptuneGraph::Graph"
@@ -188,6 +202,8 @@ Resources:
           Value: !Ref GraphName
         - Key: aria
           Value: analyticsgraph
+        - Key: auto-delete
+          Value: "no"
 
     # Private Graph Endpoint
   PrivateGraphEndpoint:
@@ -266,6 +282,8 @@ Resources:
       Tags:
         - Key: aria
           Value: state
+        - Key: auto-delete
+          Value: "no"
 
   AriaExportStateMachineRole:
     Type: AWS::IAM::Role
@@ -281,6 +299,8 @@ Resources:
       Tags:
         - Key: aria
           Value: role
+        - Key: auto-delete
+          Value: "no"
 
   AriaExportStateMachineRolePolicy:
     Type: AWS::IAM::RolePolicy
@@ -339,6 +359,8 @@ Resources:
       Tags:
         - Key: aria
           Value: eventbridge-role
+        - Key: auto-delete
+          Value: "no"
 
   AriaExportGraphTriggerRule:
     Type: AWS::Events::Rule
@@ -394,6 +416,8 @@ Resources:
       Tags:
         - Key: aria
           Value: scheduler-role
+        - Key: auto-delete
+          Value: "no"
 
   AriaExportGraphSchedule:
     Type: AWS::Scheduler::Schedule
@@ -437,6 +461,8 @@ Resources:
       Tags:
         - Key: aria
           Value: dlq
+        - Key: auto-delete
+          Value: "no"
 
   # Dead Letter Queue for failed scheduled executions
   AriaExportGraphScheduleDLQ:
@@ -459,6 +485,8 @@ Resources:
       Tags:
         - Key: aria
           Value: dlq
+        - Key: auto-delete
+          Value: "no"
 
   # CloudWatch Log Group for EventBridge rule monitoring
   AriaExportGraphTriggerLogGroup:
@@ -481,6 +509,8 @@ Resources:
       Tags:
         - Key: aria
           Value: log
+        - Key: auto-delete
+          Value: "no"
 
   # CloudWatch Log Group for scheduler monitoring
   AriaExportGraphScheduleLogGroup:
@@ -503,6 +533,8 @@ Resources:
       Tags:
         - Key: aria
           Value: log
+        - Key: auto-delete
+          Value: "no"
 
 Outputs:
   NeptuneGraphEndpoint:
@@ -511,6 +543,8 @@ Outputs:
   NeptuneGraphId:
     Value: !GetAtt CreateNeptuneAnalytics.GraphId
     Description: "Neptune Graph ID"
+    Export:
+      Name: !Sub "${AWS::StackName}-GraphId"
   NeptuneGraphName:
     Value: !Sub "${GraphName}-${AWS::StackName}"
     Description: "Neptune Graph Name"

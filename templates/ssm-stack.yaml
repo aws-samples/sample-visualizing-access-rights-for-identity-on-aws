@@ -1,5 +1,5 @@
-AWSTemplateFormatVersion: '2010-09-09'
-Description: 'SSM Parameters for Lambda function ARNs - Workforce Identity Visualization'
+AWSTemplateFormatVersion: "2010-09-09"
+Description: "SSM Parameters for Lambda function ARNs - Workforce Identity Visualization"
 
 Parameters:
   CreateTablesS3Key:
@@ -88,130 +88,203 @@ Resources:
   CreateTablesLambdaArnSSMParameter:
     Type: AWS::SSM::Parameter
     Properties:
-      Name: !Join ['', ['/aria/lambda/', !Select [0, !Split ['.', !Ref CreateTablesS3Key]]]]
+      Name:
+        !Join [
+          "",
+          ["/aria/lambda/", !Select [0, !Split [".", !Ref CreateTablesS3Key]]],
+        ]
       Type: String
       Value: !Ref CreateTablesLambdaArn
-      Description: !Sub 'ARN for Lambda function ${CreateTablesS3Key}'
+      Description: !Sub "ARN for Lambda function ${CreateTablesS3Key}"
       Tags:
         aria: ssm
 
   ListUsersLambdaArnSSMParameter:
     Type: AWS::SSM::Parameter
     Properties:
-      Name: !Join ['', ['/aria/lambda/', !Select [0, !Split ['.', !Ref ListUsersS3Key]]]]
+      Name:
+        !Join [
+          "",
+          ["/aria/lambda/", !Select [0, !Split [".", !Ref ListUsersS3Key]]],
+        ]
       Type: String
       Value: !Ref ListUsersLambdaArn
-      Description: !Sub 'ARN for Lambda function ${ListUsersS3Key}'
+      Description: !Sub "ARN for Lambda function ${ListUsersS3Key}"
       Tags:
         aria: ssm
 
   ListGroupsLambdaArnSSMParameter:
     Type: AWS::SSM::Parameter
     Properties:
-      Name: !Join ['', ['/aria/lambda/', !Select [0, !Split ['.', !Ref ListGroupsS3Key]]]]
+      Name:
+        !Join [
+          "",
+          ["/aria/lambda/", !Select [0, !Split [".", !Ref ListGroupsS3Key]]],
+        ]
       Type: String
       Value: !Ref ListGroupsLambdaArn
-      Description: !Sub 'ARN for Lambda function ${ListGroupsS3Key}'
+      Description: !Sub "ARN for Lambda function ${ListGroupsS3Key}"
       Tags:
         aria: ssm
 
   ListGroupMembershipLambdaArnSSMParameter:
     Type: AWS::SSM::Parameter
     Properties:
-      Name: !Join ['', ['/aria/lambda/', !Select [0, !Split ['.', !Ref ListGroupMembershipS3Key]]]]
+      Name:
+        !Join [
+          "",
+          [
+            "/aria/lambda/",
+            !Select [0, !Split [".", !Ref ListGroupMembershipS3Key]],
+          ],
+        ]
       Type: String
       Value: !Ref ListGroupMembershipLambdaArn
-      Description: !Sub 'ARN for Lambda function ${ListGroupMembershipS3Key}'
+      Description: !Sub "ARN for Lambda function ${ListGroupMembershipS3Key}"
       Tags:
         aria: ssm
 
   ListPermissionSetsLambdaArnSSMParameter:
     Type: AWS::SSM::Parameter
     Properties:
-      Name: !Join ['', ['/aria/lambda/', !Select [0, !Split ['.', !Ref ListPermissionSetsS3Key]]]]
+      Name:
+        !Join [
+          "",
+          [
+            "/aria/lambda/",
+            !Select [0, !Split [".", !Ref ListPermissionSetsS3Key]],
+          ],
+        ]
       Type: String
       Value: !Ref ListPermissionSetsLambdaArn
-      Description: !Sub 'ARN for Lambda function ${ListPermissionSetsS3Key}'
+      Description: !Sub "ARN for Lambda function ${ListPermissionSetsS3Key}"
       Tags:
         aria: ssm
 
   ListProvisionedPermissionSetsLambdaArnSSMParameter:
     Type: AWS::SSM::Parameter
     Properties:
-      Name: !Join ['', ['/aria/lambda/', !Select [0, !Split ['.', !Ref ListProvisionedPermissionSetsS3Key]]]]
+      Name:
+        !Join [
+          "",
+          [
+            "/aria/lambda/",
+            !Select [0, !Split [".", !Ref ListProvisionedPermissionSetsS3Key]],
+          ],
+        ]
       Type: String
       Value: !Ref ListProvisionedPermissionSetsLambdaArn
-      Description: !Sub 'ARN for Lambda function ${ListProvisionedPermissionSetsS3Key}'
+      Description: !Sub "ARN for Lambda function ${ListProvisionedPermissionSetsS3Key}"
       Tags:
         aria: ssm
 
   ListAccountsLambdaArnSSMParameter:
     Type: AWS::SSM::Parameter
     Properties:
-      Name: !Join ['', ['/aria/lambda/', !Select [0, !Split ['.', !Ref ListAccountsS3Key]]]]
+      Name:
+        !Join [
+          "",
+          ["/aria/lambda/", !Select [0, !Split [".", !Ref ListAccountsS3Key]]],
+        ]
       Type: String
       Value: !Ref ListAccountsLambdaArn
-      Description: !Sub 'ARN for Lambda function ${ListAccountsS3Key}'
+      Description: !Sub "ARN for Lambda function ${ListAccountsS3Key}"
       Tags:
         aria: ssm
 
   ListUserAccountAssignmentsLambdaArnSSMParameter:
     Type: AWS::SSM::Parameter
     Properties:
-      Name: !Join ['', ['/aria/lambda/', !Select [0, !Split ['.', !Ref ListUserAccountAssignmentsS3Key]]]]
+      Name:
+        !Join [
+          "",
+          [
+            "/aria/lambda/",
+            !Select [0, !Split [".", !Ref ListUserAccountAssignmentsS3Key]],
+          ],
+        ]
       Type: String
       Value: !Ref ListUserAccountAssignmentsLambdaArn
-      Description: !Sub 'ARN for Lambda function ${ListUserAccountAssignmentsS3Key}'
+      Description: !Sub "ARN for Lambda function ${ListUserAccountAssignmentsS3Key}"
       Tags:
         aria: ssm
 
   ListGroupAccountAssignmentsLambdaArnSSMParameter:
     Type: AWS::SSM::Parameter
     Properties:
-      Name: !Join ['', ['/aria/lambda/', !Select [0, !Split ['.', !Ref ListGroupAccountAssignmentsS3Key]]]]
+      Name:
+        !Join [
+          "",
+          [
+            "/aria/lambda/",
+            !Select [0, !Split [".", !Ref ListGroupAccountAssignmentsS3Key]],
+          ],
+        ]
       Type: String
       Value: !Ref ListGroupAccountAssignmentsLambdaArn
-      Description: !Sub 'ARN for Lambda function ${ListGroupAccountAssignmentsS3Key}'
+      Description: !Sub "ARN for Lambda function ${ListGroupAccountAssignmentsS3Key}"
       Tags:
         aria: ssm
 
   GetIAMRolesLambdaArnSSMParameter:
     Type: AWS::SSM::Parameter
     Properties:
-      Name: !Join ['', ['/aria/lambda/', !Select [0, !Split ['.', !Ref GetIAMRolesS3Key]]]]
+      Name:
+        !Join [
+          "",
+          ["/aria/lambda/", !Select [0, !Split [".", !Ref GetIAMRolesS3Key]]],
+        ]
       Type: String
       Value: !Ref GetIAMRolesLambdaArn
-      Description: !Sub 'ARN for Lambda function ${GetIAMRolesS3Key}'
+      Description: !Sub "ARN for Lambda function ${GetIAMRolesS3Key}"
       Tags:
         aria: ssm
 
   S3ExportLambdaArnSSMParameter:
     Type: AWS::SSM::Parameter
     Properties:
-      Name: !Join ['', ['/aria/lambda/', !Select [0, !Split ['.', !Ref S3ExportS3Key]]]]
+      Name:
+        !Join [
+          "",
+          ["/aria/lambda/", !Select [0, !Split [".", !Ref S3ExportS3Key]]],
+        ]
       Type: String
       Value: !Ref S3ExportLambdaArn
-      Description: !Sub 'ARN for Lambda function ${S3ExportS3Key}'
+      Description: !Sub "ARN for Lambda function ${S3ExportS3Key}"
       Tags:
         aria: ssm
 
   AccessAnalyzerFindingIngestionLambdaArnSSMParameter:
     Type: AWS::SSM::Parameter
     Properties:
-      Name: !Join ['', ['/aria/lambda/', !Select [0, !Split ['.', !Ref AccessAnalyzerFindingIngestionS3Key]]]]
+      Name:
+        !Join [
+          "",
+          [
+            "/aria/lambda/",
+            !Select [0, !Split [".", !Ref AccessAnalyzerFindingIngestionS3Key]],
+          ],
+        ]
       Type: String
       Value: !Ref AccessAnalyzerFindingIngestionLambdaArn
-      Description: !Sub 'ARN for Lambda function ${AccessAnalyzerFindingIngestionS3Key}'
+      Description: !Sub "ARN for Lambda function ${AccessAnalyzerFindingIngestionS3Key}"
       Tags:
         aria: ssm
 
   UpdateFunctionCodeLambdaArnSSMParameter:
     Type: AWS::SSM::Parameter
     Properties:
-      Name: !Join ['', ['/aria/lambda/', !Select [0, !Split ['.', !Ref UpdateFunctionCodeS3Key]]]]
+      Name:
+        !Join [
+          "",
+          [
+            "/aria/lambda/",
+            !Select [0, !Split [".", !Ref UpdateFunctionCodeS3Key]],
+          ],
+        ]
       Type: String
       Value: !Ref UpdateFunctionCodeLambdaArn
-      Description: !Sub 'ARN for Lambda function ${UpdateFunctionCodeS3Key}'
+      Description: !Sub "ARN for Lambda function ${UpdateFunctionCodeS3Key}"
       Tags:
         aria: ssm
 

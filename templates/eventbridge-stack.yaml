@@ -42,6 +42,8 @@ Resources:
       Tags:
         - Key: aria
           Value: role
+        - Key: auto-delete
+          Value: "no"
 
   # EventBridge rule to invoke UpdateFunctionCode lambda when objects are uploaded to source bucket
   InvokeUpdateFunctionCodeEventBridgeRule:
@@ -85,6 +87,8 @@ Resources:
       Tags:
         - Key: aria
           Value: role
+        - Key: auto-delete
+          Value: "no"
 
   # EventBridge rules for Access Analyzer findings
   AriaInternalAAFindingEventBridgeRule:

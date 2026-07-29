@@ -270,6 +270,8 @@ Resources:
       Tags:
         - Key: aria
           Value: state
+        - Key: auto-delete
+          Value: "no"
 
   AriaStateMachineRole:
     Type: AWS::IAM::Role
@@ -287,6 +289,8 @@ Resources:
       Tags:
         - Key: aria
           Value: role
+        - Key: auto-delete
+          Value: "no"
 
   AriaStateMachineRolePolicy:
     Type: AWS::IAM::RolePolicy
@@ -352,6 +356,8 @@ Resources:
       Tags:
         - Key: aria
           Value: scheduler-role
+        - Key: auto-delete
+          Value: "no"
 
   AriaDataCollectionSchedule:
     Type: AWS::Scheduler::Schedule
@@ -395,6 +401,8 @@ Resources:
       Tags:
         - Key: aria
           Value: dlq
+        - Key: auto-delete
+          Value: "no"
 
   # CloudWatch Log Group for data collection scheduler monitoring
   AriaDataCollectionScheduleLogGroup:
@@ -417,6 +425,8 @@ Resources:
       Tags:
         - Key: aria
           Value: log
+        - Key: auto-delete
+          Value: "no"
 
 Outputs:
   StateMachineArn:

@@ -44,7 +44,7 @@ echo_error() {
 # Function to check if S3 bucket exists
 check_bucket() {
     local bucket_name=$1
-    if aws s3api head-bucket --bucket "$bucket_name" 2>/dev/null; then
+    if aws s3api head-bucket --bucket "$bucket_name" > /dev/null 2>&1; then
         echo_info "S3 bucket $bucket_name exists"
         return 0
     else
@@ -59,21 +59,21 @@ create_bucket() {
     echo_info "Creating S3 bucket: $bucket_name"
     
     if [ "$REGION" = "us-east-1" ]; then
-        aws s3api create-bucket --bucket "$bucket_name" 
+        aws s3api create-bucket --bucket "$bucket_name" > /dev/null 2>&1
     else
         aws s3api create-bucket --bucket "$bucket_name" --region "$REGION" \
-            --create-bucket-configuration LocationConstraint="$REGION" 
+            --create-bucket-configuration LocationConstraint="$REGION" > /dev/null 2>&1
     fi
     
     # Enable versioning
     aws s3api put-bucket-versioning --bucket "$bucket_name" \
-        --versioning-configuration Status=Enabled 
+        --versioning-configuration Status=Enabled > /dev/null 2>&1
     
     echo_info "S3 bucket $bucket_name created successfully"
     
     # Store the bucket name in SSM parameter store for future reference
     if [ "$bucket_name" = "$TEMPLATES_BUCKET" ]; then
-        aws ssm put-parameter --name "aria-templates-bucket" --value "$bucket_name" --type "String" --overwrite --region "$REGION" > /dev/null
+        aws ssm put-parameter --name "aria-templates-bucket" --value "$bucket_name" --type "String" --overwrite --region "$REGION" > /dev/null 2>&1
         echo_info "Templates bucket name stored in SSM parameter store"
     fi
 }
@@ -83,7 +83,7 @@ upload_templates() {
     echo_info "Uploading CloudFormation templates to S3..."
     
     # Upload all template files
-    aws s3 cp templates/ s3://"$TEMPLATES_BUCKET"/ --recursive 
+    aws s3 cp templates/ s3://"$TEMPLATES_BUCKET"/ --recursive > /dev/null 2>&1
     
     echo_info "Templates uploaded successfully"
 }
@@ -93,7 +93,7 @@ validate_template() {
     local template_file=$1
     echo_info "Validating template: $template_file"
     
-    aws cloudformation validate-template --template-body file://"$template_file"  > /dev/null
+    aws cloudformation validate-template --template-body file://"$template_file"  > /dev/null 2>&1
     
     echo_info "Template $template_file is valid"
 }
@@ -136,7 +136,7 @@ deploy_stack() {
     echo_info "Deploying CloudFormation stack: $STACK_NAME"
 
     # Check if stack exists
-    if aws cloudformation describe-stacks --stack-name "$STACK_NAME" 2>/dev/null; then
+    if aws cloudformation describe-stacks --stack-name "$STACK_NAME" > /dev/null 2>&1; then
         echo_info "Stack exists, updating..."
         OPERATION="update-stack"
     else
@@ -160,15 +160,16 @@ deploy_stack() {
             ParameterKey=ScheduleExpression,ParameterValue="$GRAPH_EXPORT_SCHEDULE_EXPRESSION" \
             ParameterKey=ScheduleDescription,ParameterValue="$GRAPH_EXPORT_SCHEDULE_DESCRIPTION" \
             ParameterKey=ScheduleTimezone,ParameterValue="$GRAPH_EXPORT_SCHEDULE_TIMEZONE" \
-        --capabilities CAPABILITY_IAM
+            ParameterKey=ManagementAccountId,ParameterValue="$MANAGEMENT_ACCOUNT_ID" \
+        --capabilities CAPABILITY_IAM > /dev/null 2>&1
     
     echo_info "Stack deployment initiated. Waiting for completion..."
     
     # Wait for stack operation to complete
     if [ "$OPERATION" = "create-stack" ]; then
-        aws cloudformation wait stack-create-complete --stack-name "$STACK_NAME" 
+        aws cloudformation wait stack-create-complete --stack-name "$STACK_NAME" > /dev/null 2>&1
     else
-        aws cloudformation wait stack-update-complete --stack-name "$STACK_NAME" 
+        aws cloudformation wait stack-update-complete --stack-name "$STACK_NAME" > /dev/null 2>&1
     fi
     
     echo_info "Stack deployment completed successfully"
@@ -178,7 +179,7 @@ deploy_stack() {
 show_outputs() {
     echo_info "Stack outputs:"
     aws cloudformation describe-stacks --stack-name "$STACK_NAME" \
-        --query 'Stacks[0].Outputs[*].[OutputKey,OutputValue]' --output table
+        --query 'Stacks[0].Outputs[*].[OutputKey,OutputValue]' --output table 
 }
 
 # Function to set common scheduling presets
@@ -259,6 +260,17 @@ show_scheduling_summary() {
 # Generate unique templates bucket name
 ACCOUNTID=$(aws sts get-caller-identity --output json | grep Account | awk -F ': "' '{print$2}' | sed 's/\".*//')
 ACCOUNTIDSHORT=$(echo "$ACCOUNTID" | cut -c 9-12)
+
+# Resolve the management account ID from AWS Organizations
+echo_info "Resolving management account ID from AWS Organizations..."
+MANAGEMENT_ACCOUNT_ID=$(aws organizations describe-organization --query 'Organization.MasterAccountId' --output text 2>/dev/null || echo "")
+if [ -z "$MANAGEMENT_ACCOUNT_ID" ]; then
+    echo_warn "Could not resolve management account ID from Organizations API."
+    echo_warn "Falling back to current account ID: $ACCOUNTID"
+    MANAGEMENT_ACCOUNT_ID="$ACCOUNTID"
+else
+    echo_info "Management account ID: $MANAGEMENT_ACCOUNT_ID"
+fi
 
 # Check SSM parameter store to see if the templates bucket name has already been generated
 TEMPLATES_BUCKET=$(aws ssm get-parameter --name "aria-templates-bucket" --region "$REGION" --query "Parameter.Value" --output text 2>/dev/null || echo "")

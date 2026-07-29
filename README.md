@@ -70,6 +70,8 @@ The ARIA-gv solution supports **intelligent automatic scheduling** with event-dr
 
 This intelligent approach helps your Neptune graph to reflect the most current data while optimizing costs and execution efficiency.
 
+
+
 ## Let's build!
 
 **IMPORTANT:** If you are deploying this solution and have ALREADY deployed prior to July 9th 2025, you must manually delete the old cloudformation stacks in this order:
@@ -258,6 +260,11 @@ This solution is under active development so there will be various updates and i
 4. Once the Lambda functions are updated, re-run the deployment script (`deploy-nested-stacks.sh`) using the same command line as you used previously.
 
 **NOTE:** If you have made *any* changes to the solution then performing this update **will overwrite** your changes - take note!
+
+## Recent Changes
+
+- **KMS permissions for Lambda execution roles**: Various Lambda function IAM execution role policies now include `kms:DescribeKey` and `kms:Decrypt` permissions to support AWS IAM Identity Center environments that use KMS keys for encryption. If you use a Customer Mananaged KMS Key (CMK) then please update the kms key alias accordingly.
+- **Bootstrap and deployment script improvements**: The `aria-bootstrap.sh` and `deploy-nested-stacks.sh` scripts have been streamlined for a simpler, more reliable deployment experience.
 
 ## Troubleshooting
 
