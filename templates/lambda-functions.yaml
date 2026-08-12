@@ -26,6 +26,8 @@ Parameters:
     Type: String
   GetIAMRolesS3Key:
     Type: String
+  ListAccountAccessAssignmentsS3Key:
+    Type: String
   S3ExportS3Key:
     Type: String
   AccessAnalyzerFindingIngestionS3Key:
@@ -1376,6 +1378,142 @@ Resources:
         - Key: auto-delete
           Value: "no"
 
+  # ListAccountAccessAssignments Lambda Execution Role
+  ListAccountAccessAssignmentsManagedPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Metadata:
+      cfn-lint:
+        config:
+          ignore_checks:
+            - W3037
+      cfn_nag:
+        rules_to_suppress:
+          - id: W11
+            reason: "account-access:ListEntitlements and account-access:ListApplications do not support resource-level permissions and require '*'"
+      checkov:
+        skip:
+          - id: CKV_AWS_107
+            comment: "IAM policy requires broad permissions for Account Access Manager list operations, no credentials exposure risk"
+    Properties:
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - "s3:GetObject"
+            Resource: !Sub "arn:aws:s3:::${S3SourceBucketName}/${ListAccountAccessAssignmentsS3Key}"
+          - Effect: Allow
+            Action:
+              - "logs:CreateLogGroup"
+              - "logs:CreateLogStream"
+              - "logs:PutLogEvents"
+            Resource: !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/${StackName}-ListAccountAccessAssignments-function:*"
+          - Effect: Allow
+            Action:
+              - "dynamodb:PutItem"
+              - "dynamodb:BatchWriteItem"
+              - "dynamodb:Scan"
+              - "dynamodb:DeleteItem"
+            Resource: !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/AriaIdCAccountAccessAssignments"
+          - Effect: Allow
+            Action:
+              - "dynamodb:GetItem"
+              - "dynamodb:Scan"
+            Resource:
+              - !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/AriaIdCUsers"
+              - !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/AriaIdCGroups"
+          - Effect: Allow
+            Action:
+              - "account-access:ListEntitlements"
+              - "account-access:ListApplications"
+            Resource: "*"
+
+  ListAccountAccessAssignmentsExecutionRole:
+    Type: AWS::IAM::Role
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: "sts:AssumeRole"
+      ManagedPolicyArns:
+        - !Ref ListAccountAccessAssignmentsManagedPolicy
+      Tags:
+        - Key: aria
+          Value: role
+        - Key: auto-delete
+          Value: "no"
+
+  ListAccountAccessAssignmentsFunction:
+    Type: "AWS::Lambda::Function"
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: "VPC not required for this Lambda function accessing AWS services"
+      checkov:
+        skip:
+          - id: CKV_AWS_116
+            comment: "DLQ not required for this Lambda function as it's invoked by Step Functions with built-in error handling"
+          - id: CKV_AWS_173
+            comment: "Default Lambda environment variable encryption is sufficient for this function"
+          - id: CKV_AWS_117
+            comment: "VPC not required for this Lambda function accessing AWS services"
+    Properties:
+      FunctionName: !Sub "${StackName}-ListAccountAccessAssignments-function"
+      Handler: !Ref PythonHandler
+      Role: !GetAtt ListAccountAccessAssignmentsExecutionRole.Arn
+      Code:
+        S3Bucket: !Ref S3SourceBucketName
+        S3Key: !Ref ListAccountAccessAssignmentsS3Key
+      Runtime: python3.13
+      Timeout: 900
+      MemorySize: 1024
+      Environment:
+        Variables:
+          STACK_NAME: !Ref StackName
+          PYTHON_PATH: "/var/task"
+      TracingConfig:
+        Mode: Active
+      Architectures:
+        - arm64
+      ReservedConcurrentExecutions: 3
+      Tags:
+        - Key: aria
+          Value: function
+        - Key: auto-delete
+          Value: "no"
+
+  ListAccountAccessAssignmentsLogGroup:
+    Type: "AWS::Logs::LogGroup"
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W84
+            reason: "Default CloudWatch Logs encryption is sufficient for this log group"
+      checkov:
+        skip:
+          - id: CKV_AWS_158
+            comment: "Default CloudWatch Logs encryption is sufficient for this log group"
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/${StackName}-ListAccountAccessAssignments-function"
+      RetentionInDays: 30
+      Tags:
+        - Key: aria
+          Value: log
+        - Key: auto-delete
+          Value: "no"
+
   # S3Export Lambda
   S3ExportManagedPolicy:
     Type: AWS::IAM::ManagedPolicy
@@ -1767,6 +1905,10 @@ Outputs:
     Value: !Ref GetIAMRolesFunction
   GetIAMRolesLambdaExecutionRoleArn:
     Value: !GetAtt GetIAMRolesExecutionRole.Arn
+  ListAccountAccessAssignmentsLambdaArn:
+    Value: !GetAtt ListAccountAccessAssignmentsFunction.Arn
+  ListAccountAccessAssignmentsLambdaName:
+    Value: !Ref ListAccountAccessAssignmentsFunction
   S3ExportLambdaArn:
     Value: !GetAtt S3ExportFunction.Arn
   S3ExportLambdaName:

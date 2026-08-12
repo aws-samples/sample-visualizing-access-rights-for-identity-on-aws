@@ -1,0 +1,9 @@
+# Runtime dependencies bundled into this Lambda's deployment package.
+#
+# The Lambda python3.13 runtime ships a boto3/botocore that predates the
+# 'account-access' (Account Access Manager) service model, so boto3.client(
+# 'account-access') would fail with "Unknown service" on the built-in SDK.
+# Bundling an up-to-date boto3 (which pulls a matching botocore) makes the
+# client available. These are pure-Python wheels, so no platform-specific
+# build is required - a plain `pip install --target` works on any OS.
+boto3>=1.43.69

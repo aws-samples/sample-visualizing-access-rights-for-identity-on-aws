@@ -1,0 +1,14 @@
+./mcp-server/_diag.sh
+./kiro/settings/mcp.json
+specs/
+
+# Python test/build artifacts
+.venv/
+venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Lambda dependency-bundling build dirs (created transiently by aria-bootstrap.sh)
+source/*/build/
+zip/

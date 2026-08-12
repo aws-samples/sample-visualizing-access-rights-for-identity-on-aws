@@ -217,7 +217,27 @@ ARIA_RUNTIME_ARN=... AWS_REGION=us-east-1 \
 
 ### Updating the server
 
-Rebuild and push a new image (step 1), then update the runtime to the new image tag. The server speaks streamable-HTTP on `0.0.0.0:8000` at `/mcp`.
+The server speaks streamable-HTTP on `0.0.0.0:8000` at `/mcp`. To ship a code change:
+
+1. **Rebuild and push a new image** (same as deploy step 1):
+
+   ```bash
+   cd mcp-server
+   IMAGE_URI=$(./build-and-push.sh -r us-east-1)
+   echo "$IMAGE_URI"
+   ```
+
+2. **Point the runtime at the new image.** Pushing a new image does **not** update a running runtime on its own - AgentCore Runtime is versioned, so a new image only takes effect once you create and activate a new runtime version. In the AWS console:
+
+   - Go to **Amazon Bedrock AgentCore -> Runtime**.
+   - Select the MCP server runtime (the one from the `McpRuntimeArn` stack output).
+   - Choose **Update Runtime** and select the **latest version** of the image, then confirm.
+
+   This creates a new runtime version and points the `DEFAULT` endpoint at it. See [Version and endpoint management for AgentCore Runtime](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/agent-runtime-versioning.html) for how versions and endpoints work.
+
+   > If you pushed the new image to the **same tag** the runtime already references, you still have to run **Update Runtime** so AgentCore picks up the new image digest as a new version - the change is not automatic.
+
+3. **Reconnect the client.** No `mcp.json` change is needed (the endpoint URL and ARN are unchanged); just reconnect from Kiro's MCP Server view so it re-initializes against the updated runtime.
 
 ## Notes and limits
 

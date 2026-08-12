@@ -85,6 +85,7 @@ LAMBDA_FUNCTIONS=(
   "listaccounts"
   "listuseraccountassignments"
   "listgroupaccountassignments"
+  "listaccountaccessassignments"
   "getiamroles"
   "accessanalyzerfindingingestion"
   "s3export"
@@ -94,11 +95,42 @@ LAMBDA_FUNCTIONS=(
 # Remove existing zip files
 rm -f ./zip/*.zip
 
+# Absolute path to the zip output dir so we can zip from inside a build dir
+ZIP_DIR="$(cd "$SOURCE_DIR" && pwd)"
+
+# Resolve a usable pip for bundling function dependencies. Different machines
+# expose it as `pip`, `pip3`, or only via `python3 -m pip`.
+if command -v pip > /dev/null 2>&1; then
+  PIP="pip"
+elif command -v pip3 > /dev/null 2>&1; then
+  PIP="pip3"
+else
+  PIP="python3 -m pip"
+fi
+
 # Create directories and zip files in a loop
 for func in "${LAMBDA_FUNCTIONS[@]}"; do
   echo "Processing ${func}..."
   mkdir -p "./source/${func}"
-  zip -j "./zip/${func}.zip" "./source/${func}/lambda_function.py"
+
+  if [ -f "./source/${func}/requirements.txt" ]; then
+    # This function bundles third-party dependencies (e.g. an up-to-date
+    # boto3/botocore because the Lambda runtime's built-in SDK predates the
+    # 'account-access' service model). Install them alongside the handler and
+    # zip the whole package so they land at the root of the deployment archive.
+    echo "  Bundling dependencies from requirements.txt..."
+    BUILD_DIR="./source/${func}/build"
+    rm -rf "$BUILD_DIR"
+    mkdir -p "$BUILD_DIR"
+    cp "./source/${func}/lambda_function.py" "$BUILD_DIR/"
+    $PIP install -r "./source/${func}/requirements.txt" --target "$BUILD_DIR" --quiet
+    # Zip the handler + deps at the archive root. Exclude compiled/console-script
+    # cruft (__pycache__, *.pyc, bin/) so only the importable payload ships.
+    (cd "$BUILD_DIR" && zip -r "$ZIP_DIR/${func}.zip" . -x "*__pycache__*" -x "*.pyc" -x "bin/*" > /dev/null)
+    rm -rf "$BUILD_DIR"
+  else
+    zip -j "./zip/${func}.zip" "./source/${func}/lambda_function.py"
+  fi
 done
 
 echo "Zip files created successfully!"

@@ -62,6 +62,11 @@ Parameters:
     Description: S3 key (path) to the GetIAMRoles Lambda function code zip file
     Default: "getiamroles.zip"
 
+  ListAccountAccessAssignmentsS3Key:
+    Type: String
+    Description: S3 key (path) to the ListAccountAccessAssignments Lambda function code zip file
+    Default: "listaccountaccessassignments.zip"
+
   S3ExportS3Key:
     Type: String
     Description: S3 key (path) to the S3Export Lambda function code zip file
@@ -278,6 +283,7 @@ Metadata:
           - ListUserAccountAssignmentsS3Key
           - ListGroupAccountAssignmentsS3Key
           - GetIAMRolesS3Key
+          - ListAccountAccessAssignmentsS3Key
           - S3ExportS3Key
           - AccessAnalyzerFindingIngestionS3Key
           - UpdateFunctionCodeS3Key
@@ -342,6 +348,7 @@ Resources:
         ListUserAccountAssignmentsS3Key: !Ref ListUserAccountAssignmentsS3Key
         ListGroupAccountAssignmentsS3Key: !Ref ListGroupAccountAssignmentsS3Key
         GetIAMRolesS3Key: !Ref GetIAMRolesS3Key
+        ListAccountAccessAssignmentsS3Key: !Ref ListAccountAccessAssignmentsS3Key
         S3ExportS3Key: !Ref S3ExportS3Key
         AccessAnalyzerFindingIngestionS3Key: !Ref AccessAnalyzerFindingIngestionS3Key
         UpdateFunctionCodeS3Key: !Ref UpdateFunctionCodeS3Key
@@ -372,6 +379,7 @@ Resources:
         ListUserAccountAssignmentsS3Key: !Ref ListUserAccountAssignmentsS3Key
         ListGroupAccountAssignmentsS3Key: !Ref ListGroupAccountAssignmentsS3Key
         GetIAMRolesS3Key: !Ref GetIAMRolesS3Key
+        ListAccountAccessAssignmentsS3Key: !Ref ListAccountAccessAssignmentsS3Key
         S3ExportS3Key: !Ref S3ExportS3Key
         AccessAnalyzerFindingIngestionS3Key: !Ref AccessAnalyzerFindingIngestionS3Key
         UpdateFunctionCodeS3Key: !Ref UpdateFunctionCodeS3Key
@@ -385,6 +393,7 @@ Resources:
         ListUserAccountAssignmentsLambdaArn: !GetAtt LambdaStack.Outputs.ListUserAccountAssignmentsLambdaArn
         ListGroupAccountAssignmentsLambdaArn: !GetAtt LambdaStack.Outputs.ListGroupAccountAssignmentsLambdaArn
         GetIAMRolesLambdaArn: !GetAtt LambdaStack.Outputs.GetIAMRolesLambdaArn
+        ListAccountAccessAssignmentsLambdaArn: !GetAtt LambdaStack.Outputs.ListAccountAccessAssignmentsLambdaArn
         S3ExportLambdaArn: !GetAtt LambdaStack.Outputs.S3ExportLambdaArn
         AccessAnalyzerFindingIngestionLambdaArn: !GetAtt LambdaStack.Outputs.AccessAnalyzerFindingIngestionLambdaArn
         UpdateFunctionCodeLambdaArn: !GetAtt LambdaStack.Outputs.UpdateFunctionCodeLambdaArn
@@ -430,6 +439,7 @@ Resources:
         ListUserAccountAssignmentsLambdaArn: !GetAtt LambdaStack.Outputs.ListUserAccountAssignmentsLambdaArn
         ListGroupAccountAssignmentsLambdaArn: !GetAtt LambdaStack.Outputs.ListGroupAccountAssignmentsLambdaArn
         GetIAMRolesLambdaArn: !GetAtt LambdaStack.Outputs.GetIAMRolesLambdaArn
+        ListAccountAccessAssignmentsLambdaArn: !GetAtt LambdaStack.Outputs.ListAccountAccessAssignmentsLambdaArn
         EnableDataCollectionScheduling: !Ref EnableDataCollectionScheduling
         DataCollectionScheduleExpression: !Ref DataCollectionScheduleExpression
         DataCollectionScheduleDescription: !Ref DataCollectionScheduleDescription

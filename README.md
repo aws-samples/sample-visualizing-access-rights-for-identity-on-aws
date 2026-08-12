@@ -39,6 +39,11 @@ Full instructions are in the [Deployment guide](docs/deployment.md).
 
 ## Recent updates
 
+- **AWS Account Access Manager support** - added a collector that discovers the Account Access Manager application and gathers its entitlements per principal, mapping them to IAM roles and accounts so Account Access Manager-granted access shows up in the graph alongside IAM Identity Center assignments. The [MCP server](mcp-server/README.md) was also updated to surface this Account Access Manager data in natural-language queries.
+- **MCP server on Python MCP SDK 2.0** - the [ARIA-gv MCP server](mcp-server/README.md) now targets the [v2 line](https://py.sdk.modelcontextprotocol.io/v2/whats-new/) of the Python MCP SDK, which brings:
+  - a stateless protocol core (the 2026-07-28 MCP revision) that drops the connection handshake, session IDs, and server-initiated requests for better reliability and scalability;
+  - a reworked SDK engine;
+  - a first-class `Client` object that connects and negotiates the protocol version in one step.
 - **Faster data collection** - the IAM role and account-assignment collectors now process accounts, users, and groups concurrently, write to DynamoDB in batches, and fully paginate the source APIs. Collection Lambdas also run with more memory (1024 MB) and a longer timeout (15 min).
 - **Faster, more reliable graph refresh** - the graph export/import state machine now polls the graph reset and import-task status instead of waiting fixed time windows, so runs advance as soon as each step completes and surface a real failure if the import doesn't succeed.
 - **Natural-language querying** - added the ARIA-gv MCP server for asking questions in plain English, hosted on Amazon Bedrock AgentCore Runtime. See the [MCP server README](mcp-server/README.md).

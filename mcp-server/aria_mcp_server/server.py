@@ -1,29 +1,26 @@
-"""FastMCP server exposing the ARIA-gv identity access graph as tools.
+"""MCP server exposing the ARIA-gv identity access graph as tools.
 
 The graph is a point-in-time Neptune Analytics snapshot of identity/access
 relationships collected from IAM Identity Center, IAM, and IAM Access Analyzer.
 All tools are read-only. See queries.py for the graph model.
+
+Built on the mcp 2.x SDK. The 2.0 release replaced ``mcp.server.fastmcp.FastMCP``
+with ``mcp.server.mcpserver.MCPServer``, and the transport settings
+(host/port/path/stateless) moved from the constructor onto ``run()``.
 """
 
 from __future__ import annotations
 
 from typing import Any
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 
 from . import queries
 from .graph_client import AriaGraphClient, GraphError, ReadOnlyViolation
 
-# Host/port/path satisfy the AgentCore Runtime MCP contract (0.0.0.0:8000, /mcp).
-# Stateless mode is required by AgentCore Runtime, which injects its own
-# Mcp-Session-Id header.
-mcp = FastMCP(
-    "aria-gv",
-    host="0.0.0.0",  # nosec B104 - required by the AgentCore Runtime contract
-    port=8000,
-    stateless_http=True,
-    streamable_http_path="/mcp",
-)
+# The transport settings that satisfy the AgentCore Runtime MCP contract
+# (0.0.0.0:8000, /mcp, stateless) are applied at run() time - see main_http().
+mcp = MCPServer("aria-gv")
 
 # One lazily-initialised client for the process. boto3/graph-id resolution
 # happens on first query, not at import time, so the server starts cleanly even
@@ -53,7 +50,11 @@ Nodes (node id `~id` in parentheses):
 - GroupName (GroupId): groupname
 - PermissionSet (PermissionSetArn): name, description
 - AccountName (AccountId): name
-- RoleName (IamRoleArn): rolename, accountid, roleid, attachedpolicies
+- RoleName (IamRoleArn): rolename, accountid, roleid, attachedpolicies, source
+    `source` records provenance. It is set to AccountAccessManager for roles a
+    principal is entitled to DIRECTLY (a direct role assignment), as opposed to
+    roles reached via an IAM Identity Center permission set. A role reached by
+    both routes is a single node carrying the union of properties.
 - CriticalResources (ResourceARN): resourcetype
 - InternalAccessFinding (FindingId): action, principal, resourcearn, findingtype, accesstype, status, ...
 - UnusedAccessFinding (FindingId): resourcearn, numberofunusedactions, numberofunusedservices, status, ...
@@ -61,19 +62,31 @@ Nodes (node id `~id` in parentheses):
 Edges (from -> to):
 - (GroupName)-[:HAS_MEMBERS]->(UserName)
 - (UserName|GroupName)-[:ASSIGNED_PERMISSIONSET]->(PermissionSet)
+- (UserName|GroupName)-[:ASSIGNED_ROLE]->(RoleName)     # direct role assignment (no permission set)
 - (UserName|GroupName)-[:ASSIGNED_ACCOUNT]->(AccountName)
 - (PermissionSet)-[:PROVISIONED_INTO]->(AccountName)
 - (PermissionSet)-[:CREATED_AS]->(RoleName)
 - (RoleName)-[:CREATED_IN]->(AccountName)
+- (RoleName)-[:EXISTS_IN]->(AccountName)                # direct-role placement in an account
 - (InternalAccessFinding)-[:LINKED_TO]->(RoleName | CriticalResources)
 - (RoleName)-[:GRANTS_ACCESS_TO]->(CriticalResources)
 - (CriticalResources)-[:BELONGS_TO]->(AccountName)
 - (RoleName)-[:HAS_UNUSED_ACCESS]->(UnusedAccessFinding)
 
-A human-to-resource path is typically:
-  (User)<-[:HAS_MEMBERS]-(Group)-[:ASSIGNED_PERMISSIONSET]->(PermissionSet)
-        -[:CREATED_AS]->(Role)-[:GRANTS_ACCESS_TO]->(CriticalResources)
-or, for a directly-assigned user, without the group hop.
+There are TWO independent ways a human principal reaches an IAM role, and either
+can lead on to a critical resource. Do NOT assume access is only via permission
+sets:
+
+1. Permission-set route (IAM Identity Center):
+   (User)<-[:HAS_MEMBERS]-(Group)-[:ASSIGNED_PERMISSIONSET]->(PermissionSet)
+         -[:CREATED_AS]->(Role)-[:GRANTS_ACCESS_TO]->(CriticalResources)
+2. Direct role assignment (e.g. Account Access Manager entitlement):
+   (User)<-[:HAS_MEMBERS]-(Group)-[:ASSIGNED_ROLE]->(Role)
+         -[:GRANTS_ACCESS_TO]->(CriticalResources)
+
+In both routes the group hop is optional - a user can be assigned directly. When
+answering "who can access" / "how can X access", cover BOTH routes (UNION them)
+unless asked about one specifically.
 
 What a principal can DO to a resource lives on InternalAccessFinding.action, not
 on the edge. Filter on that property for verbs like update / write / delete.
@@ -102,8 +115,12 @@ def find_access_paths(
     """Show HOW a user can reach a critical resource (the "how was Bob able to
     update this resource" question).
 
-    Returns every distinct path from the user to the resource: the group (if
-    any), permission set, IAM role, and the finding actions that permit it.
+    Returns every distinct path from the user to the resource across BOTH access
+    routes - IAM Identity Center permission sets and direct role assignments
+    (Account Access Manager entitlements). Each row includes the group (if any),
+    an `access_via` tag (permission_set or direct_role), the permission set (null
+    for direct-role access), the IAM role, the role's `source`, and the finding
+    actions that permit it.
 
     Args:
         principal: user name or a substring of it (case-insensitive match).
@@ -121,7 +138,11 @@ def who_can_access(
     resource: str, actions: list[str] | None = None
 ) -> dict[str, Any]:
     """List every human principal (users, directly or via groups) that can reach
-    a resource.
+    a resource, across BOTH access routes: IAM Identity Center permission sets
+    and direct role assignments (Account Access Manager entitlements).
+
+    Returns one row per (principal, role, route); the `access_via` field tags
+    each as permission_set or direct_role.
 
     Args:
         resource: resource ARN or substring.
@@ -206,9 +227,16 @@ def main_http() -> None:
 
     This is the only transport the server exposes. It hosts the MCP protocol on
     Amazon Bedrock AgentCore Runtime, which speaks streamable-HTTP and provides
-    session isolation.
+    session isolation. Stateless mode is required because AgentCore injects its
+    own Mcp-Session-Id header.
     """
-    mcp.run(transport="streamable-http")
+    mcp.run(
+        transport="streamable-http",
+        host="0.0.0.0",  # nosec B104 - required by the AgentCore Runtime contract
+        port=8000,
+        streamable_http_path="/mcp",
+        stateless_http=True,
+    )
 
 
 if __name__ == "__main__":

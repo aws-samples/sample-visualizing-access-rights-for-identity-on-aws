@@ -29,6 +29,9 @@ Parameters:
   ListGroupAccountAssignmentsS3Key:
     Type: String
     Description: S3 key for ListGroupAccountAssignments Lambda function
+  ListAccountAccessAssignmentsS3Key:
+    Type: String
+    Description: S3 key for ListAccountAccessAssignments Lambda function
   GetIAMRolesS3Key:
     Type: String
     Description: S3 key for GetIAMRoles Lambda function
@@ -70,6 +73,9 @@ Parameters:
   ListGroupAccountAssignmentsLambdaArn:
     Type: String
     Description: ARN of ListGroupAccountAssignments Lambda function
+  ListAccountAccessAssignmentsLambdaArn:
+    Type: String
+    Description: ARN of ListAccountAccessAssignments Lambda function
   GetIAMRolesLambdaArn:
     Type: String
     Description: ARN of GetIAMRoles Lambda function
@@ -226,6 +232,23 @@ Resources:
       Tags:
         aria: ssm
 
+  ListAccountAccessAssignmentsLambdaArnSSMParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name:
+        !Join [
+          "",
+          [
+            "/aria/lambda/",
+            !Select [0, !Split [".", !Ref ListAccountAccessAssignmentsS3Key]],
+          ],
+        ]
+      Type: String
+      Value: !Ref ListAccountAccessAssignmentsLambdaArn
+      Description: !Sub "ARN for Lambda function ${ListAccountAccessAssignmentsS3Key}"
+      Tags:
+        aria: ssm
+
   GetIAMRolesLambdaArnSSMParameter:
     Type: AWS::SSM::Parameter
     Properties:
@@ -316,6 +339,9 @@ Outputs:
   ListGroupAccountAssignmentsSSMParameterName:
     Description: Name of SSM parameter for ListGroupAccountAssignments Lambda ARN
     Value: !Ref ListGroupAccountAssignmentsLambdaArnSSMParameter
+  ListAccountAccessAssignmentsSSMParameterName:
+    Description: Name of SSM parameter for ListAccountAccessAssignments Lambda ARN
+    Value: !Ref ListAccountAccessAssignmentsLambdaArnSSMParameter
   GetIAMRolesSSMParameterName:
     Description: Name of SSM parameter for GetIAMRoles Lambda ARN
     Value: !Ref GetIAMRolesLambdaArnSSMParameter

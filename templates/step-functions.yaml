@@ -32,6 +32,9 @@ Parameters:
   GetIAMRolesLambdaArn:
     Type: String
     Description: ARN of GetIAMRoles Lambda function
+  ListAccountAccessAssignmentsLambdaArn:
+    Type: String
+    Description: ARN of ListAccountAccessAssignments Lambda function
 
   # Scheduling Parameters for AriaStateMachine
   EnableDataCollectionScheduling:
@@ -243,6 +246,25 @@ Resources:
                         BackoffRate: 2
                         JitterStrategy: FULL
                     End: true
+              - StartAt: List Account Access Manager Assignments
+                States:
+                  List Account Access Manager Assignments:
+                    Type: Task
+                    Resource: arn:aws:states:::lambda:invoke
+                    Output: "{% $states.result.Payload %}"
+                    Arguments:
+                      FunctionName: !Ref ListAccountAccessAssignmentsLambdaArn
+                    Retry:
+                      - ErrorEquals:
+                          - Lambda.ServiceException
+                          - Lambda.AWSLambdaException
+                          - Lambda.SdkClientException
+                          - Lambda.TooManyRequestsException
+                        IntervalSeconds: 1
+                        MaxAttempts: 3
+                        BackoffRate: 2
+                        JitterStrategy: FULL
+                    End: true
           List IAM Roles created by IAM Identity Center:
             Type: Task
             Resource: arn:aws:states:::lambda:invoke
@@ -314,6 +336,7 @@ Resources:
               - !Ref ListUserAccountAssignmentsLambdaArn
               - !Ref ListGroupAccountAssignmentsLambdaArn
               - !Ref GetIAMRolesLambdaArn
+              - !Ref ListAccountAccessAssignmentsLambdaArn
           - Effect: Allow
             Action:
               - logs:CreateLogDelivery

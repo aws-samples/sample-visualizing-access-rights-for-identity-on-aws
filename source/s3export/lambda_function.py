@@ -135,6 +135,22 @@ def lambda_handler(event, context):
         csv_headers = ["~id", "resourcearn:String", "findingtype:String", "accesstype:String", "resourcetype:String",  "status:String", "numberofunusedactions:String", "numberofunusedservices:String", "~label"]
         export_dynamodb_to_s3("AriaIdCUnusedAAFindings", s3_bucket, "AriaIdCUnusedAAFindings.csv", table_headers, csv_headers,label="UnusedAccessFinding")
 
+    # Only export Account Access Manager (AAM) data if the table has items
+    if check_table_has_items("AriaIdCAccountAccessAssignments"):
+        # Export AAM-entitled IAM roles as RoleName nodes, deduped on IamRoleArn so each
+        # role appears once. The source:String property records AAM provenance.
+        table_headers = ["IamRoleArn", "AccountId", "RoleName", "Source", "Label"]
+        csv_headers = ["~id", "accountid:String", "rolename:String", "source:String", "~label"]
+        export_dynamodb_to_s3(
+            "AriaIdCAccountAccessAssignments",
+            s3_bucket,
+            "AriaIdCAccountAccessRoles.csv",
+            table_headers,
+            csv_headers,
+            label="RoleName",
+            dedup_fields=["IamRoleArn"]
+        )
+
     
 #EDGES
 
@@ -252,6 +268,40 @@ def lambda_handler(event, context):
         label="CREATED_AS"
         )
     
+    # Only export Account Access Manager (AAM) data if the table has items
+    if check_table_has_items("AriaIdCAccountAccessAssignments"):
+        # Export principal-to-role edge (User|Group) -> Role as ASSIGNED_ROLE.
+        # ~from is the principal id and ~to is the role ARN; deduped on
+        # (PrincipalId, IamRoleArn) so each entitlement yields a single edge.
+        table_headers = ["UniqueId", "PrincipalId", "IamRoleArn", "Label"]
+        csv_headers = ["~id", "~from", "~to", "~label"]
+        export_dynamodb_to_s3(
+            "AriaIdCAccountAccessAssignments",
+            s3_bucket,
+            "AriaIdCAccountAccess_Principal_Role_Edge.csv",
+            table_headers,
+            csv_headers,
+            generate_uuid=True,
+            label="ASSIGNED_ROLE",
+            dedup_fields=["PrincipalId", "IamRoleArn"]
+        )
+
+        # Export role-to-account edge Role -> Account as EXISTS_IN.
+        # ~from is the role ARN and ~to is the account id; deduped on
+        # (IamRoleArn, AccountId) so each entitled role links to its account once.
+        table_headers = ["UniqueId", "IamRoleArn", "AccountId", "Label"]
+        csv_headers = ["~id", "~from", "~to", "~label"]
+        export_dynamodb_to_s3(
+            "AriaIdCAccountAccessAssignments",
+            s3_bucket,
+            "AriaIdCAccountAccessRole_Account_Edge.csv",
+            table_headers,
+            csv_headers,
+            generate_uuid=True,
+            label="EXISTS_IN",
+            dedup_fields=["IamRoleArn", "AccountId"]
+        )
+
     # Only export Internal Access Analyzer Findings if the table has items
     if check_table_has_items("AriaIdCInternalAAFindings"):
 

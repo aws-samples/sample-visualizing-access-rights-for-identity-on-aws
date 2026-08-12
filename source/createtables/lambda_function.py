@@ -116,6 +116,21 @@ def create_tables(dynamodb):
             'AttributeDefinitions': [
                 {'AttributeName': 'FindingId', 'AttributeType': 'S'}
             ]
+        },
+        'AriaIdCAccountAccessAssignments': {
+            # Composite key (PrincipalId, IamRoleArn) uniquely identifies an
+            # Account Access Manager entitlement and keeps one row per mapping so a
+            # principal entitled to multiple roles is not collapsed. Both key
+            # components are stored so the graph export can project them directly as
+            # edge endpoints, mirroring AriaIdCUserAccountAssignments.
+            'KeySchema': [
+                {'AttributeName': 'PrincipalId', 'KeyType': 'HASH'},
+                {'AttributeName': 'IamRoleArn', 'KeyType': 'RANGE'}
+            ],
+            'AttributeDefinitions': [
+                {'AttributeName': 'PrincipalId', 'AttributeType': 'S'},
+                {'AttributeName': 'IamRoleArn', 'AttributeType': 'S'}
+            ]
         }
     }
 
