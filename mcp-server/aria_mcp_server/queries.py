@@ -9,12 +9,19 @@ Graph model (see the solution's s3export lambda for the source of truth):
   Nodes:  UserName{username}, GroupName{groupname}, PermissionSet{name},
           AccountName{name}, RoleName{rolename,accountid,source},
           CriticalResources{resourcetype}, InternalAccessFinding{action,...},
-          UnusedAccessFinding{...}
+          UnusedAccessFinding{...}, ExternalAccessFinding{action,principal,...},
+          ExternalPrincipal{principalname,principaltype}
 
           RoleName.source records provenance: it is set to AccountAccessManager
           for roles that arrive via an AAM entitlement. A role that is both an
           IdC-provisioned role and an AAM-entitled role merges into one RoleName
           node (matched on the Iam role ARN) carrying the union of properties.
+
+          ExternalPrincipal is an entity OUTSIDE the zone of trust (another AWS
+          account, a federated/service principal, or the special node "PUBLIC"
+          for anonymous access). CriticalResources is shared with internal
+          findings: a resource flagged by both analyzers is one node keyed on its
+          ARN.
 
   Edges:  (Group)-[:HAS_MEMBERS]->(User)
           (User|Group)-[:ASSIGNED_PERMISSIONSET]->(PermissionSet)
@@ -28,6 +35,8 @@ Graph model (see the solution's s3export lambda for the source of truth):
           (Role)-[:GRANTS_ACCESS_TO]->(CriticalResources)
           (CriticalResources)-[:BELONGS_TO]->(Account)
           (Role)-[:HAS_UNUSED_ACCESS]->(UnusedAccessFinding)
+          (ExternalAccessFinding)-[:LINKED_TO]->(ExternalPrincipal|CriticalResources)
+          (ExternalPrincipal)-[:HAS_EXTERNAL_ACCESS_TO]->(CriticalResources)
 
   Two routes reach an account from a principal: the IdC permission-set route
   (principal -> PermissionSet -> Account) and the AAM route
@@ -48,6 +57,7 @@ _ENTITY_MAP = {
     "accounts": ("AccountName", "name"),
     "roles": ("RoleName", "rolename"),
     "resources": ("CriticalResources", "`~id`"),
+    "externalprincipals": ("ExternalPrincipal", "`~id`"),
 }
 
 
@@ -257,6 +267,43 @@ def unused_access(limit: int) -> tuple[str, dict[str, Any]]:
     return query, params
 
 
+def external_access(
+    resource: str | None, actions: list[str] | None, limit: int
+) -> tuple[str, dict[str, Any]]:
+    """External-access exposures: which external principals can reach which
+    internal resources (the "what is shared outside my zone of trust" question).
+
+    Returns one row per (external principal, resource) exposure with the granting
+    finding's actions, the principal type, whether it is public, and the resource
+    account. Optionally scope to a resource ARN substring and/or require certain
+    action verbs.
+    """
+    params: dict[str, Any] = {"limit": limit}
+    resource_clause = ""
+    if resource:
+        params["resource"] = resource
+        resource_clause = "  AND r.`~id` CONTAINS $resource\n"
+    action_clause = ""
+    if actions:
+        params["actions"] = actions
+        action_clause = f"  AND {_action_filter('f')}\n"
+
+    query = (
+        "MATCH (p:ExternalPrincipal)-[:HAS_EXTERNAL_ACCESS_TO]->(r:CriticalResources)\n"
+        "MATCH (f:ExternalAccessFinding)-[:LINKED_TO]->(r)\n"
+        "WHERE (f)-[:LINKED_TO]->(p)\n"
+        f"{resource_clause}{action_clause}"
+        "OPTIONAL MATCH (r)-[:BELONGS_TO]->(acct:AccountName)\n"
+        "RETURN DISTINCT p.`~id` AS external_principal,\n"
+        "       p.principaltype AS principal_type, f.ispublic AS is_public,\n"
+        "       r.`~id` AS resource, acct.name AS resource_account,\n"
+        "       f.action AS granted_actions, f.status AS status\n"
+        "ORDER BY resource, external_principal\n"
+        "LIMIT $limit"
+    )
+    return query, params
+
+
 def list_entities(entity: str, limit: int) -> tuple[str, dict[str, Any]]:
     """List nodes of one kind. `entity` is a key of _ENTITY_MAP."""
     key = entity.lower().strip()
@@ -270,6 +317,8 @@ def list_entities(entity: str, limit: int) -> tuple[str, dict[str, Any]]:
     elif key == "roles":
         # source distinguishes direct-assignment (AccountAccessManager) roles.
         extra = ", n.accountid AS account, n.source AS source"
+    elif key == "externalprincipals":
+        extra = ", n.principaltype AS principaltype"
     else:
         extra = ""
     query = (

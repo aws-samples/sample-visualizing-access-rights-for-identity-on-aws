@@ -1665,6 +1665,13 @@ Resources:
               - !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/AriaIdCInternalAAFindings"
               - !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/AriaIdCUnusedAAFindings"
               - !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/AriaIdCExternalAAFindings"
+          # Read-only scan of the AAM entitlements table so unused-access findings
+          # can be scoped to Account Access Manager roles (in addition to SSO roles).
+          - Effect: Allow
+            Action:
+              - "dynamodb:Scan"
+            Resource:
+              - !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/AriaIdCAccountAccessAssignments"
 
   AccessAnalyzerFindingIngestionRole:
     Type: AWS::IAM::Role

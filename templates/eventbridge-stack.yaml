@@ -1,5 +1,5 @@
-AWSTemplateFormatVersion: '2010-09-09'
-Description: 'EventBridge rules and related resources for Workforce Identity Visualization'
+AWSTemplateFormatVersion: "2010-09-09"
+Description: "EventBridge rules and related resources for Workforce Identity Visualization"
 
 Parameters:
   S3SourceBucketName:
@@ -21,19 +21,19 @@ Resources:
     Type: AWS::IAM::Role
     Properties:
       AssumeRolePolicyDocument:
-        Version: '2012-10-17'
+        Version: "2012-10-17"
         Statement:
           - Effect: Allow
             Principal:
               Service: events.amazonaws.com
-            Action: 'sts:AssumeRole'
+            Action: "sts:AssumeRole"
             Condition:
               StringEquals:
-                aws:SourceArn: !Sub 'arn:${AWS::Partition}:events:${AWS::Region}:${AWS::AccountId}:rule/${StackName}-Source-Trigger-UpdateFunctionCode'
+                aws:SourceArn: !Sub "arn:${AWS::Partition}:events:${AWS::Region}:${AWS::AccountId}:rule/${StackName}-Source-Trigger-UpdateFunctionCode"
       Policies:
         - PolicyName: InvokeUpdateFunctionCodeEventBridgeInvokePolicy
           PolicyDocument:
-            Version: '2012-10-17'
+            Version: "2012-10-17"
             Statement:
               - Effect: Allow
                 Action:
@@ -49,7 +49,7 @@ Resources:
   InvokeUpdateFunctionCodeEventBridgeRule:
     Type: AWS::Events::Rule
     Properties:
-      Name: !Sub '${StackName}-Source-Trigger-UpdateFunctionCode'
+      Name: !Sub "${StackName}-Source-Trigger-UpdateFunctionCode"
       EventPattern: !Sub '{"source":["aws.s3"],"detail-type":["Object Created"],"detail":{"bucket":{"name":["${S3SourceBucketName}"]}}}'
       State: ENABLED
       EventBusName: default
@@ -63,22 +63,22 @@ Resources:
     Type: AWS::IAM::Role
     Properties:
       AssumeRolePolicyDocument:
-        Version: '2012-10-17'
+        Version: "2012-10-17"
         Statement:
           - Effect: Allow
             Principal:
               Service: events.amazonaws.com
-            Action: 'sts:AssumeRole'
+            Action: "sts:AssumeRole"
             Condition:
               StringEquals:
                 aws:SourceArn:
-                  - !Sub 'arn:${AWS::Partition}:events:${AWS::Region}:${AWS::AccountId}:rule/${StackName}-Internal-AA-Trigger-Ingestion'
-                  - !Sub 'arn:${AWS::Partition}:events:${AWS::Region}:${AWS::AccountId}:rule/${StackName}-Unused-AA-Trigger-Ingestion'
-                  - !Sub 'arn:${AWS::Partition}:events:${AWS::Region}:${AWS::AccountId}:rule/${StackName}-External-AA-Trigger-Ingestion'
+                  - !Sub "arn:${AWS::Partition}:events:${AWS::Region}:${AWS::AccountId}:rule/${StackName}-Internal-AA-Trigger-Ingestion"
+                  - !Sub "arn:${AWS::Partition}:events:${AWS::Region}:${AWS::AccountId}:rule/${StackName}-Unused-AA-Trigger-Ingestion"
+                  - !Sub "arn:${AWS::Partition}:events:${AWS::Region}:${AWS::AccountId}:rule/${StackName}-External-AA-Trigger-Ingestion"
       Policies:
         - PolicyName: AccessAnalyzerFindingIngestionEventBridgeInvokePolicy
           PolicyDocument:
-            Version: '2012-10-17'
+            Version: "2012-10-17"
             Statement:
               - Effect: Allow
                 Action:
@@ -92,25 +92,36 @@ Resources:
 
   # EventBridge rules for Access Analyzer findings
   AriaInternalAAFindingEventBridgeRule:
-    Type: AWS::Events::Rule 
+    Type: AWS::Events::Rule
     Properties:
-      Name: !Sub '${StackName}-Internal-AA-Trigger-Ingestion'
+      Name: !Sub "${StackName}-Internal-AA-Trigger-Ingestion"
+      # Catch every internal-access finding whose principal is an IAM role. For
+      # internal findings the role is the PRINCIPAL (detail.principal.AWS), not
+      # the resource. Scoping to the roles we visualize (IdC/SSO roles and Account
+      # Access Manager entitled roles) happens in the ingestion Lambda, because
+      # AAM roles have arbitrary ARNs with no pattern EventBridge can match.
+      # Filtering on principalType also naturally excludes error findings, which
+      # carry no principal.
       EventPattern: >-
-        {"source":["aws.access-analyzer"],"detail-type":["Internal Access
-        Finding"],"detail":{"principal":{"AWS":[{"wildcard":"arn:aws:iam::*:role/aws-reserved/sso.amazonaws.com/AWSReservedSSO_*"}]}}}
+        {"source":["aws.access-analyzer"],"detail-type":["Internal Access Finding"],"detail":{"principalType":["IAM_ROLE"]}}
       State: ENABLED
       EventBusName: default
       Targets:
         - Id: Idd97798e1-e511-4494-8c47-3f25568cd5bc
           Arn: !Ref AccessAnalyzerFindingIngestionLambdaArn
           RoleArn: !GetAtt AriaAccessAnalyzerFindingIngestionEventBridgeInvokeRole.Arn
-  
+
   AriaUnusedAAFindingEventBridgeRule:
     Type: AWS::Events::Rule
     Properties:
-      Name: !Sub '${StackName}-Unused-AA-Trigger-Ingestion'
+      Name: !Sub "${StackName}-Unused-AA-Trigger-Ingestion"
+      # Catch every unused-access finding for an IAM role. Scoping to the roles we
+      # actually visualize (IdC/SSO roles and Account Access Manager entitled
+      # roles) happens in the ingestion Lambda, because AAM roles have arbitrary
+      # ARNs with no pattern EventBridge can match. The detail must be nested to
+      # mirror the event structure - a flat "detail.resource" key never matches.
       EventPattern: >-
-        {"source":["aws.access-analyzer"],"detail-type":["Unused Access Finding for IAM entities"],"detail.resource":[{"wildcard":"arn:aws:iam::*:role/aws-reserved/sso.amazonaws.com/AWSReservedSSO_*"}]}
+        {"source":["aws.access-analyzer"],"detail-type":["Unused Access Finding for IAM entities"],"detail":{"resourceType":["AWS::IAM::Role"]}}
       State: ENABLED
       EventBusName: default
       Targets:
@@ -121,7 +132,7 @@ Resources:
   AriaExternalAAFindingEventBridgeRule:
     Type: AWS::Events::Rule
     Properties:
-      Name: !Sub '${StackName}-External-AA-Trigger-Ingestion'
+      Name: !Sub "${StackName}-External-AA-Trigger-Ingestion"
       EventPattern: >-
         {"source":["aws.access-analyzer"],"detail-type":["Access Analyzer Finding"]}
       State: ENABLED

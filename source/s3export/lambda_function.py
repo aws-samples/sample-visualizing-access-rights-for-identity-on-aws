@@ -135,6 +135,27 @@ def lambda_handler(event, context):
         csv_headers = ["~id", "resourcearn:String", "findingtype:String", "accesstype:String", "resourcetype:String",  "status:String", "numberofunusedactions:String", "numberofunusedservices:String", "~label"]
         export_dynamodb_to_s3("AriaIdCUnusedAAFindings", s3_bucket, "AriaIdCUnusedAAFindings.csv", table_headers, csv_headers,label="UnusedAccessFinding")
 
+    # Only export External Access Analyzer Findings if the table has items
+    if check_table_has_items("AriaIdCExternalAAFindings"):
+        # Export ExternalAccessFinding nodes.
+        table_headers = ["FindingId", "ResourceARN", "FindingType", "AccessType", "Principal", "PrincipalName", "PrincipalType", "ResourceType", "ResourceAccount", "Action", "Condition", "IsPublic", "Status", "Label"]
+        csv_headers = ["~id", "resourcearn:String", "findingtype:String", "accesstype:String", "principal:String", "principalname:String", "principaltype:String", "resourcetype:String", "resourceaccount:String", "action:String", "condition:String", "ispublic:String", "status:String", "~label"]
+        export_dynamodb_to_s3("AriaIdCExternalAAFindings", s3_bucket, "AriaIdCExternalAAFindings.csv", table_headers, csv_headers, label="ExternalAccessFinding")
+
+        # Export the external principals (the entities OUTSIDE the zone of trust) as
+        # ExternalPrincipal nodes, deduped on Principal so each external entity
+        # appears once regardless of how many resources it can reach.
+        table_headers = ["Principal", "PrincipalName", "PrincipalType", "Label"]
+        csv_headers = ["~id", "principalname:String", "principaltype:String", "~label"]
+        export_dynamodb_to_s3("AriaIdCExternalAAFindings", s3_bucket, "AriaIdCExternalPrincipals.csv", table_headers, csv_headers, label="ExternalPrincipal", dedup_fields=["Principal"])
+
+        # Export the externally-exposed resources as CriticalResources nodes (same
+        # label/key as internal findings, keyed on ResourceARN, so a resource
+        # flagged by both analyzers merges into a single node in the graph).
+        table_headers = ["ResourceARN", "ResourceType", "Label"]
+        csv_headers = ["~id", "resourcetype:String", "~label"]
+        export_dynamodb_to_s3("AriaIdCExternalAAFindings", s3_bucket, "AriaIdCExternalResources.csv", table_headers, csv_headers, label="CriticalResources", dedup_fields=["ResourceARN"])
+
     # Only export Account Access Manager (AAM) data if the table has items
     if check_table_has_items("AriaIdCAccountAccessAssignments"):
         # Export AAM-entitled IAM roles as RoleName nodes, deduped on IamRoleArn so each
@@ -352,6 +373,65 @@ def lambda_handler(event, context):
             "AriaIdCInternalAAFindings",
             s3_bucket,
             "AriaIdCInternalAAFindingsResource_Account_Edge.csv",
+            table_headers,
+            csv_headers,
+            generate_uuid=True,
+            label="BELONGS_TO",
+            dedup_fields=["ResourceARN", "ResourceAccount"]
+            )
+
+    # Only export External Access Analyzer Findings if the table has items
+    if check_table_has_items("AriaIdCExternalAAFindings"):
+
+        # Export External Access Analyzer Finding to Resource csv file - EDGE
+        table_headers = ["UniqueId", "FindingId", "ResourceARN", "Label"]
+        csv_headers = ["~id", "~from", "~to", "~label"]
+        export_dynamodb_to_s3(
+            "AriaIdCExternalAAFindings",
+            s3_bucket,
+            "AriaIdCExternalAAFindingsResource_Edge.csv",
+            table_headers,
+            csv_headers,
+            generate_uuid=True,
+            label="LINKED_TO"
+            )
+
+        # Export External Access Analyzer Finding to External Principal csv file - EDGE
+        table_headers = ["UniqueId", "FindingId", "Principal", "Label"]
+        csv_headers = ["~id", "~from", "~to", "~label"]
+        export_dynamodb_to_s3(
+            "AriaIdCExternalAAFindings",
+            s3_bucket,
+            "AriaIdCExternalAAFindingsPrincipal_Edge.csv",
+            table_headers,
+            csv_headers,
+            generate_uuid=True,
+            label="LINKED_TO"
+            )
+
+        # Export External Principal to Resource csv file - EDGE
+        # The external entity has access to the internal resource; dedup on
+        # (Principal, ResourceARN) so a single access relationship yields one edge.
+        table_headers = ["UniqueId", "Principal", "ResourceARN", "Label"]
+        csv_headers = ["~id", "~from", "~to", "~label"]
+        export_dynamodb_to_s3(
+            "AriaIdCExternalAAFindings",
+            s3_bucket,
+            "AriaIdCExternal_Principal_Resource_Edge.csv",
+            table_headers,
+            csv_headers,
+            generate_uuid=True,
+            label="HAS_EXTERNAL_ACCESS_TO",
+            dedup_fields=["Principal", "ResourceARN"]
+            )
+
+        # Export External Finding Resource to Account csv file - EDGE
+        table_headers = ["UniqueId", "ResourceARN", "ResourceAccount", "Label"]
+        csv_headers = ["~id", "~from", "~to", "~label"]
+        export_dynamodb_to_s3(
+            "AriaIdCExternalAAFindings",
+            s3_bucket,
+            "AriaIdCExternalResource_Account_Edge.csv",
             table_headers,
             csv_headers,
             generate_uuid=True,

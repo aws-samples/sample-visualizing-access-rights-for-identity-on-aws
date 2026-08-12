@@ -58,6 +58,10 @@ Nodes (node id `~id` in parentheses):
 - CriticalResources (ResourceARN): resourcetype
 - InternalAccessFinding (FindingId): action, principal, resourcearn, findingtype, accesstype, status, ...
 - UnusedAccessFinding (FindingId): resourcearn, numberofunusedactions, numberofunusedservices, status, ...
+- ExternalAccessFinding (FindingId): action, principal, principaltype, resourcearn, resourceaccount, condition, ispublic, status, ...
+- ExternalPrincipal (Principal): principalname, principaltype - an entity OUTSIDE the
+    zone of trust (another AWS account, a federated/service principal, or the
+    special node "PUBLIC" for anonymous access)
 
 Edges (from -> to):
 - (GroupName)-[:HAS_MEMBERS]->(UserName)
@@ -72,6 +76,14 @@ Edges (from -> to):
 - (RoleName)-[:GRANTS_ACCESS_TO]->(CriticalResources)
 - (CriticalResources)-[:BELONGS_TO]->(AccountName)
 - (RoleName)-[:HAS_UNUSED_ACCESS]->(UnusedAccessFinding)
+- (ExternalAccessFinding)-[:LINKED_TO]->(ExternalPrincipal | CriticalResources)
+- (ExternalPrincipal)-[:HAS_EXTERNAL_ACCESS_TO]->(CriticalResources)
+
+External access is the inverse direction of the internal model: an
+ExternalPrincipal (outside the zone of trust) reaches an internal
+CriticalResources node. CriticalResources is shared with internal findings, so a
+resource flagged by both analyzers is a single node keyed on its ARN. What the
+external principal can DO lives on ExternalAccessFinding.action.
 
 There are TWO independent ways a human principal reaches an IAM role, and either
 can lead on to a critical resource. Do NOT assume access is only via permission
@@ -182,12 +194,35 @@ def find_unused_access(limit: int = 50) -> dict[str, Any]:
 
 
 @mcp.tool()
+def find_external_access(
+    resource: str | None = None, actions: list[str] | None = None, limit: int = 100
+) -> dict[str, Any]:
+    """List external-access exposures: which external principals (other AWS
+    accounts, federated/service principals, or PUBLIC) can reach which internal
+    resources, per IAM Access Analyzer external-access findings.
+
+    Returns one row per (external principal, resource) with the granted actions,
+    principal type, whether the access is public, and the resource's account.
+
+    Args:
+        resource: optional resource ARN substring to scope the report (e.g. a
+            bucket name). Omit to list all external exposures.
+        actions: optional action-substring filter, e.g. ["get", "put"]. Omit for
+            any access.
+        limit: max rows (default 100).
+    """
+    query, params = queries.external_access(resource, actions, limit)
+    return _run(query, params)
+
+
+@mcp.tool()
 def list_entities(entity: str, limit: int = 100) -> dict[str, Any]:
     """List nodes of one kind - useful to confirm exact names/ARNs before a
     targeted query.
 
     Args:
-        entity: one of users, groups, permissionsets, accounts, roles, resources.
+        entity: one of users, groups, permissionsets, accounts, roles, resources,
+            externalprincipals.
         limit: max rows (default 100).
     """
     try:
