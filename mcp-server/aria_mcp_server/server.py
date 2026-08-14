@@ -169,14 +169,46 @@ def who_can_access(
 def get_principal_access(
     principal: str, account: str | None = None
 ) -> dict[str, Any]:
-    """Report everything a user can access: their permission sets, the accounts
-    those are provisioned into, and the critical resources reachable.
+    """Report everything a user can access across BOTH routes - IAM Identity
+    Center permission sets and direct role assignments (Account Access Manager
+    entitlements) - one row per reachable resource (or per account-level grant
+    when no critical resource is attached).
+
+    Each row carries an `access_via` tag (permission_set or direct_role); the
+    `permission_set` is null for the direct-role route. `account` is where the
+    access lands (the account the permission set is provisioned into, or the
+    account the direct role sits in); `resource` / `resource_account` describe the
+    reachable critical resource and its owning account.
 
     Args:
         principal: user name or substring.
-        account: optional account-name substring to scope the report.
+        account: optional account-name substring to scope the report (matched
+            against the account the access lands in or the resource's owner).
     """
     query, params = queries.principal_access_report(principal, account)
+    return _run(query, params)
+
+
+@mcp.tool()
+def get_principal_access_summary(
+    principal: str, account: str | None = None
+) -> dict[str, Any]:
+    """Compact roll-up of what a user can reach, grouped by route and grant.
+
+    Same two-route coverage as get_principal_access, but returns one row per
+    (access_via, grant, iam_role) with a `resource_count` and the deduplicated
+    `resources` list instead of one row per resource. Prefer this for
+    wide-access principals (e.g. admins) where the per-resource report runs to
+    hundreds of rows. `grant` is the permission-set name on the permission_set
+    route and the role's source (e.g. AccountAccessManager) on the direct_role
+    route. Only grants that reach at least one critical resource are returned.
+
+    Args:
+        principal: user name or substring.
+        account: optional account-name substring, matched against the resource's
+            owning account.
+    """
+    query, params = queries.principal_access_summary(principal, account)
     return _run(query, params)
 
 

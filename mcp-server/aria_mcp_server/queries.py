@@ -198,47 +198,135 @@ def principal_access_report(
 ) -> tuple[str, dict[str, Any]]:
     """Everything a user can reach, optionally scoped to one account name.
 
-    Covers both access routes: the IdC permission-set path
-    (principal -> PermissionSet -> Account / Role / Resource) and the Account
-    Access Manager path (principal -[:ASSIGNED_ROLE]-> Role
-    -[:EXISTS_IN|CREATED_IN]-> Account), so AAM entitlements appear alongside
-    permission-set access. Both paths allow the group hop via HAS_MEMBERS.
+    Covers both access routes and UNIONs them so they never cross-join:
+      - permission_set: principal -> PermissionSet -> (Account / Role -> Resource)
+      - direct_role:    principal -[:ASSIGNED_ROLE]-> Role
+                        -[:EXISTS_IN|CREATED_IN]-> Account,
+                        -[:GRANTS_ACCESS_TO]-> Resource
+
+    Each row is tagged with `access_via`; `permission_set` is null on the direct
+    route. `account` is where the access lands - the account the granting role
+    lives in (CREATED_IN for the IdC route, EXISTS_IN/CREATED_IN for the direct
+    route); `resource` / `resource_account` describe the reachable critical
+    resource (null when the grant is account-level only). Both routes allow the
+    optional group hop via HAS_MEMBERS.
+
+    Deriving the account from the granting role (not from the permission set's
+    PROVISIONED_INTO edges) matters: a permission set provisioned into many
+    accounts would otherwise cross-join every one of those accounts with every
+    resource the role grants, multiplying rows and blowing the LIMIT. Each SSO
+    role instance lives in exactly one account, so CREATED_IN keeps one row per
+    (role, resource).
+
+    Matching the two routes as two independent OPTIONAL MATCH chains off the same
+    user produces a cartesian product (every permission-set row crossed with every
+    direct-role row), which both smears bogus duplicate data across rows and
+    exhausts the LIMIT with junk. UNIONing the routes - as find_access_paths and
+    who_can_access already do - avoids that.
     """
     params: dict[str, Any] = {"principal": principal}
     account_clause = ""
     if account:
         params["account"] = account
+        # Unambiguous now: match either the account the access lands in or the
+        # account that owns the reachable resource - not three ORed meanings.
         account_clause = (
             "WHERE acct.name CONTAINS $account\n"
             "   OR resacct.name CONTAINS $account\n"
-            "   OR aamacct.name CONTAINS $account\n"
         )
 
-    query = (
+    ps_branch = (
         "MATCH (u:UserName)\n"
         "WHERE toLower(u.username) CONTAINS toLower($principal)\n"
-        # IdC permission-set route (directly or via a group).
-        "OPTIONAL MATCH (u)-[:ASSIGNED_PERMISSIONSET|HAS_MEMBERS*1..2]-(ps:PermissionSet)\n"
-        "OPTIONAL MATCH (ps)-[:PROVISIONED_INTO]->(acct:AccountName)\n"
-        "OPTIONAL MATCH (ps)-[:CREATED_AS]->(role:RoleName)"
-        "-[:GRANTS_ACCESS_TO]->(res:CriticalResources)\n"
-        "OPTIONAL MATCH (res)-[:BELONGS_TO]->(resacct:AccountName)\n"
-        # Account Access Manager route (directly or via a group).
-        "OPTIONAL MATCH (u)-[:ASSIGNED_ROLE|HAS_MEMBERS*1..2]-(aamrole:RoleName)\n"
-        "OPTIONAL MATCH (aamrole)-[:EXISTS_IN|CREATED_IN]->(aamacct:AccountName)\n"
+        "MATCH (u)-[:ASSIGNED_PERMISSIONSET|HAS_MEMBERS*1..2]-(ps:PermissionSet)\n"
+        "OPTIONAL MATCH (ps)-[:CREATED_AS]->(role:RoleName)\n"
+        "OPTIONAL MATCH (role)-[:CREATED_IN]->(acct:AccountName)\n"
+        "OPTIONAL MATCH (role)-[:GRANTS_ACCESS_TO]->(res:CriticalResources)"
+        "-[:BELONGS_TO]->(resacct:AccountName)\n"
         f"{account_clause}"
-        "RETURN DISTINCT u.username AS user, ps.name AS permission_set,\n"
-        "       acct.name AS account, role.rolename AS iam_role,\n"
-        "       res.`~id` AS resource, resacct.name AS resource_account,\n"
-        "       aamrole.rolename AS aam_role, aamrole.source AS aam_role_source,\n"
-        "       aamacct.name AS aam_account\n"
-        "ORDER BY account, permission_set\n"
+        "RETURN DISTINCT u.username AS user, 'permission_set' AS access_via,\n"
+        "       ps.name AS permission_set, role.rolename AS iam_role,\n"
+        "       role.source AS role_source, acct.name AS account,\n"
+        "       res.`~id` AS resource, resacct.name AS resource_account\n"
         "LIMIT 200"
     )
+
+    role_branch = (
+        "MATCH (u:UserName)\n"
+        "WHERE toLower(u.username) CONTAINS toLower($principal)\n"
+        "MATCH (u)-[:ASSIGNED_ROLE|HAS_MEMBERS*1..2]-(role:RoleName)\n"
+        "OPTIONAL MATCH (role)-[:EXISTS_IN|CREATED_IN]->(acct:AccountName)\n"
+        "OPTIONAL MATCH (role)-[:GRANTS_ACCESS_TO]->(res:CriticalResources)"
+        "-[:BELONGS_TO]->(resacct:AccountName)\n"
+        f"{account_clause}"
+        "RETURN DISTINCT u.username AS user, 'direct_role' AS access_via,\n"
+        "       null AS permission_set, role.rolename AS iam_role,\n"
+        "       role.source AS role_source, acct.name AS account,\n"
+        "       res.`~id` AS resource, resacct.name AS resource_account\n"
+        "LIMIT 200"
+    )
+
+    query = f"{ps_branch}\nUNION\n{role_branch}"
     return query, params
 
 
-def unused_access(limit: int) -> tuple[str, dict[str, Any]]:
+def principal_access_summary(
+    principal: str, account: str | None
+) -> tuple[str, dict[str, Any]]:
+    """Compact roll-up of what a user can reach, grouped by route and grant.
+
+    Same two-route coverage as principal_access_report, but instead of one row
+    per reachable resource it returns one row per (access_via, grant, iam_role)
+    with a `resource_count` and the deduplicated `resources` list. This is the
+    readable shape for wide-access principals, where the per-resource report runs
+    to hundreds of rows. `grant` is the permission-set name on the IdC route and
+    the role's `source` (e.g. AccountAccessManager) on the direct route.
+
+    Only rows with at least one reachable critical resource are returned; scope
+    to an account via `account` (matched against the resource's owning account).
+    """
+    params: dict[str, Any] = {"principal": principal}
+    account_clause = ""
+    if account:
+        params["account"] = account
+        account_clause = "  AND acct.name CONTAINS $account\n"
+
+    ps_branch = (
+        "MATCH (u:UserName)\n"
+        "WHERE toLower(u.username) CONTAINS toLower($principal)\n"
+        "MATCH (u)-[:ASSIGNED_PERMISSIONSET|HAS_MEMBERS*1..2]-(ps:PermissionSet)\n"
+        "MATCH (ps)-[:CREATED_AS]->(role:RoleName)"
+        "-[:GRANTS_ACCESS_TO]->(res:CriticalResources)-[:BELONGS_TO]->(acct:AccountName)\n"
+        "WHERE res IS NOT NULL\n"
+        f"{account_clause}"
+        "RETURN 'permission_set' AS access_via, ps.name AS grant,\n"
+        "       role.rolename AS iam_role, res.`~id` AS resource"
+    )
+
+    role_branch = (
+        "MATCH (u:UserName)\n"
+        "WHERE toLower(u.username) CONTAINS toLower($principal)\n"
+        "MATCH (u)-[:ASSIGNED_ROLE|HAS_MEMBERS*1..2]-(role:RoleName)\n"
+        "MATCH (role)-[:GRANTS_ACCESS_TO]->(res:CriticalResources)"
+        "-[:BELONGS_TO]->(acct:AccountName)\n"
+        "WHERE res IS NOT NULL\n"
+        f"{account_clause}"
+        "RETURN 'direct_role' AS access_via, role.source AS grant,\n"
+        "       role.rolename AS iam_role, res.`~id` AS resource"
+    )
+
+    query = (
+        "CALL {\n"
+        f"{ps_branch}\n"
+        "UNION\n"
+        f"{role_branch}\n"
+        "}\n"
+        "RETURN access_via, grant, iam_role,\n"
+        "       count(DISTINCT resource) AS resource_count,\n"
+        "       collect(DISTINCT resource) AS resources\n"
+        "ORDER BY access_via, grant"
+    )
+    return query, params
     """Roles with IAM Access Analyzer unused-access findings, worst first.
 
     Attributes each flagged role to the principals that hold it by BOTH routes:
