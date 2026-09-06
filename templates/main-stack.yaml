@@ -62,6 +62,11 @@ Parameters:
     Description: S3 key (path) to the GetIAMRoles Lambda function code zip file
     Default: "getiamroles.zip"
 
+  GetTrustPoliciesS3Key:
+    Type: String
+    Description: S3 key (path) to the GetTrustPolicies Lambda function code zip file
+    Default: "gettrustpolicies.zip"
+
   ListAccountAccessAssignmentsS3Key:
     Type: String
     Description: S3 key (path) to the ListAccountAccessAssignments Lambda function code zip file
@@ -71,11 +76,6 @@ Parameters:
     Type: String
     Description: S3 key (path) to the S3Export Lambda function code zip file
     Default: "s3export.zip"
-
-  AccessAnalyzerFindingIngestionS3Key:
-    Type: String
-    Description: S3 key (path) to the AccessAnalyzerFindingIngestion Lambda function code zip file
-    Default: "accessanalyzerfindingingestion.zip"
 
   UpdateFunctionCodeS3Key:
     Type: String
@@ -249,6 +249,124 @@ Parameters:
     Type: String
     Description: "AWS Account ID of the Organizations management account (for KMS key access)"
 
+  AccessAnalyzerPollerS3Key:
+    Type: String
+    Description: S3 key (path) to the AccessAnalyzerPoller Lambda function code zip file
+    Default: "accessanalyzerpoller.zip"
+
+  InternalAccessAnalyzerArn:
+    Type: String
+    Description: ARN of the ORGANIZATION_INTERNAL_ACCESS analyzer in the Delegated_Administrator_Account
+
+  ExternalAccessAnalyzerArn:
+    Type: String
+    Description: ARN of the ORGANIZATION analyzer in the Delegated_Administrator_Account
+
+  UnusedAccessAnalyzerArn:
+    Type: String
+    Description: ARN of the ORGANIZATION_UNUSED_ACCESS analyzer in the Delegated_Administrator_Account
+
+  DelegatedAdminAccountId:
+    Type: String
+    Description: AWS Account ID registered as the IAM Access Analyzer delegated administrator
+
+  AccessAnalyzerPollerRoleName:
+    Type: String
+    Description: Name of the cross-account role in DelegatedAdminAccountId that this Lambda assumes
+    Default: AriaAccessAnalyzerPollerRole
+
+  AccessAnalyzerPollerMaxPollAttempts:
+    Type: Number
+    Default: 6
+    MinValue: 1
+    MaxValue: 50
+    Description: >-
+      Max Step Functions re-invocations per finding family per Polling_Cycle
+      while a family still has unfetched changed/new findings. Raise
+      temporarily for a large initial backfill (e.g. 20-30 for 10k+ findings
+      on first run), then lower back to the default once the backlog clears.
+
+  AccessAnalyzerPollerRequestsPerSecond:
+    Type: Number
+    Default: 0.5
+    MinValue: 0.01
+    Description: >-
+      Fixed rate limit, in requests per second, applied between GetFindingV2
+      calls while reconciling internal and external finding families (default
+      0.5 RPS = 1 request every 2 seconds).
+
+  AccessAnalyzerDispatcherRoleName:
+    Type: String
+    Default: AriaAccessAnalyzerDispatcherRole
+    Description: Name of the cross-account role assumed by the unused-role dispatcher
+
+  AccessAnalyzerWorkerRoleName:
+    Type: String
+    Default: AriaAccessAnalyzerWorkerRole
+    Description: Name of the cross-account role assumed by the unused-role detail worker
+
+  UnusedRoleWorkerRequestsPerSecond:
+    Type: Number
+    Default: 0.5
+    MinValue: 0.01
+    Description: >-
+      Strict global GetFindingV2 rate limit for queued unused IAM-role
+      findings. The SQS worker always has one concurrent execution.
+
+  UnusedRoleWorkerBatchSize:
+    Type: Number
+    Default: 10
+    MinValue: 1
+    MaxValue: 10
+    Description: Maximum SQS messages delivered per unused-role worker invocation
+
+  UnusedRoleQueueVisibilityTimeoutSeconds:
+    Type: Number
+    Default: 600
+    MinValue: 120
+    MaxValue: 43200
+    Description: SQS work-message visibility timeout, in seconds
+
+  UnusedRoleQueueMaxReceiveCount:
+    Type: Number
+    Default: 5
+    MinValue: 1
+    MaxValue: 1000
+    Description: Receives before a failed unused-role work message moves to the DLQ
+
+  UnusedRoleDispatcherLeaseSeconds:
+    Type: Number
+    Default: 900
+    MinValue: 60
+    MaxValue: 3600
+    Description: Lease duration that prevents overlapping unused-role dispatch runs
+
+  # Access Analyzer Scheduling Parameters - the AriaAccessAnalyzerStateMachine
+  # runs on its own schedule, independent of AriaStateMachine's identity data
+  # collection, so Access Analyzer findings can be polled more frequently.
+  EnableAccessAnalyzerScheduling:
+    Type: String
+    Description: Enable automatic scheduling of the AriaAccessAnalyzerStateMachine
+    Default: "false"
+    AllowedValues:
+      - "true"
+      - "false"
+
+  AccessAnalyzerScheduleExpression:
+    Type: String
+    Description: "Schedule expression for automatic Access Analyzer polling (e.g., rate(15 minutes), cron(0/15 * * * ? *))"
+    Default: "rate(15 minutes)"
+
+  AccessAnalyzerScheduleDescription:
+    Type: String
+    Description: "Description for the scheduled Access Analyzer polling execution"
+    Default: "Automated ARIA Access Analyzer findings polling every 15 minutes"
+
+  AccessAnalyzerScheduleTimezone:
+    Type: String
+    Description: "Timezone for cron-based schedules (e.g., America/New_York, UTC)"
+    Default: "UTC"
+
 Conditions:
   ShouldDeployNeptune: !Equals [!Ref DeployNeptune, "true"]
   ShouldDeployNeptuneNotebook: !And
@@ -283,10 +401,28 @@ Metadata:
           - ListUserAccountAssignmentsS3Key
           - ListGroupAccountAssignmentsS3Key
           - GetIAMRolesS3Key
+          - GetTrustPoliciesS3Key
           - ListAccountAccessAssignmentsS3Key
           - S3ExportS3Key
-          - AccessAnalyzerFindingIngestionS3Key
           - UpdateFunctionCodeS3Key
+      - Label:
+          default: "Access Analyzer Poller"
+        Parameters:
+          - AccessAnalyzerPollerS3Key
+          - InternalAccessAnalyzerArn
+          - ExternalAccessAnalyzerArn
+          - UnusedAccessAnalyzerArn
+          - DelegatedAdminAccountId
+          - AccessAnalyzerPollerRoleName
+          - AccessAnalyzerPollerMaxPollAttempts
+          - AccessAnalyzerPollerRequestsPerSecond
+          - AccessAnalyzerDispatcherRoleName
+          - AccessAnalyzerWorkerRoleName
+          - UnusedRoleWorkerRequestsPerSecond
+          - UnusedRoleWorkerBatchSize
+          - UnusedRoleQueueVisibilityTimeoutSeconds
+          - UnusedRoleQueueMaxReceiveCount
+          - UnusedRoleDispatcherLeaseSeconds
       - Label:
           default: "Python Handler"
         Parameters:
@@ -326,6 +462,13 @@ Metadata:
           - DataCollectionScheduleExpression
           - DataCollectionScheduleDescription
           - DataCollectionScheduleTimezone
+      - Label:
+          default: "Access Analyzer Scheduling"
+        Parameters:
+          - EnableAccessAnalyzerScheduling
+          - AccessAnalyzerScheduleExpression
+          - AccessAnalyzerScheduleDescription
+          - AccessAnalyzerScheduleTimezone
 
 Resources:
   # Lambda Functions Stack
@@ -348,13 +491,28 @@ Resources:
         ListUserAccountAssignmentsS3Key: !Ref ListUserAccountAssignmentsS3Key
         ListGroupAccountAssignmentsS3Key: !Ref ListGroupAccountAssignmentsS3Key
         GetIAMRolesS3Key: !Ref GetIAMRolesS3Key
+        GetTrustPoliciesS3Key: !Ref GetTrustPoliciesS3Key
         ListAccountAccessAssignmentsS3Key: !Ref ListAccountAccessAssignmentsS3Key
         S3ExportS3Key: !Ref S3ExportS3Key
-        AccessAnalyzerFindingIngestionS3Key: !Ref AccessAnalyzerFindingIngestionS3Key
         UpdateFunctionCodeS3Key: !Ref UpdateFunctionCodeS3Key
         PythonHandler: !Ref PythonHandler
         StackName: !Ref AWS::StackName
         ManagementAccountId: !Ref ManagementAccountId
+        AccessAnalyzerPollerS3Key: !Ref AccessAnalyzerPollerS3Key
+        InternalAccessAnalyzerArn: !Ref InternalAccessAnalyzerArn
+        ExternalAccessAnalyzerArn: !Ref ExternalAccessAnalyzerArn
+        UnusedAccessAnalyzerArn: !Ref UnusedAccessAnalyzerArn
+        DelegatedAdminAccountId: !Ref DelegatedAdminAccountId
+        AccessAnalyzerPollerRoleName: !Ref AccessAnalyzerPollerRoleName
+        AccessAnalyzerPollerMaxPollAttempts: !Ref AccessAnalyzerPollerMaxPollAttempts
+        AccessAnalyzerPollerRequestsPerSecond: !Ref AccessAnalyzerPollerRequestsPerSecond
+        AccessAnalyzerDispatcherRoleName: !Ref AccessAnalyzerDispatcherRoleName
+        AccessAnalyzerWorkerRoleName: !Ref AccessAnalyzerWorkerRoleName
+        UnusedRoleWorkerRequestsPerSecond: !Ref UnusedRoleWorkerRequestsPerSecond
+        UnusedRoleWorkerBatchSize: !Ref UnusedRoleWorkerBatchSize
+        UnusedRoleQueueVisibilityTimeoutSeconds: !Ref UnusedRoleQueueVisibilityTimeoutSeconds
+        UnusedRoleQueueMaxReceiveCount: !Ref UnusedRoleQueueMaxReceiveCount
+        UnusedRoleDispatcherLeaseSeconds: !Ref UnusedRoleDispatcherLeaseSeconds
       Tags:
         - Key: aria
           Value: nested-stack
@@ -381,7 +539,7 @@ Resources:
         GetIAMRolesS3Key: !Ref GetIAMRolesS3Key
         ListAccountAccessAssignmentsS3Key: !Ref ListAccountAccessAssignmentsS3Key
         S3ExportS3Key: !Ref S3ExportS3Key
-        AccessAnalyzerFindingIngestionS3Key: !Ref AccessAnalyzerFindingIngestionS3Key
+        AccessAnalyzerPollerS3Key: !Ref AccessAnalyzerPollerS3Key
         UpdateFunctionCodeS3Key: !Ref UpdateFunctionCodeS3Key
         CreateTablesLambdaArn: !GetAtt LambdaStack.Outputs.CreateTablesLambdaArn
         ListUsersLambdaArn: !GetAtt LambdaStack.Outputs.ListUsersLambdaArn
@@ -395,7 +553,7 @@ Resources:
         GetIAMRolesLambdaArn: !GetAtt LambdaStack.Outputs.GetIAMRolesLambdaArn
         ListAccountAccessAssignmentsLambdaArn: !GetAtt LambdaStack.Outputs.ListAccountAccessAssignmentsLambdaArn
         S3ExportLambdaArn: !GetAtt LambdaStack.Outputs.S3ExportLambdaArn
-        AccessAnalyzerFindingIngestionLambdaArn: !GetAtt LambdaStack.Outputs.AccessAnalyzerFindingIngestionLambdaArn
+        AccessAnalyzerPollerLambdaArn: !GetAtt LambdaStack.Outputs.AccessAnalyzerPollerLambdaArn
         UpdateFunctionCodeLambdaArn: !GetAtt LambdaStack.Outputs.UpdateFunctionCodeLambdaArn
       Tags:
         - Key: aria
@@ -413,7 +571,6 @@ Resources:
       Parameters:
         S3SourceBucketName: !Ref S3SourceBucketName
         UpdateFunctionCodeLambdaArn: !GetAtt LambdaStack.Outputs.UpdateFunctionCodeLambdaArn
-        AccessAnalyzerFindingIngestionLambdaArn: !GetAtt LambdaStack.Outputs.AccessAnalyzerFindingIngestionLambdaArn
         StackName: !Ref AWS::StackName
       Tags:
         - Key: aria
@@ -439,11 +596,35 @@ Resources:
         ListUserAccountAssignmentsLambdaArn: !GetAtt LambdaStack.Outputs.ListUserAccountAssignmentsLambdaArn
         ListGroupAccountAssignmentsLambdaArn: !GetAtt LambdaStack.Outputs.ListGroupAccountAssignmentsLambdaArn
         GetIAMRolesLambdaArn: !GetAtt LambdaStack.Outputs.GetIAMRolesLambdaArn
+        GetTrustPoliciesLambdaArn: !GetAtt LambdaStack.Outputs.GetTrustPoliciesLambdaArn
         ListAccountAccessAssignmentsLambdaArn: !GetAtt LambdaStack.Outputs.ListAccountAccessAssignmentsLambdaArn
         EnableDataCollectionScheduling: !Ref EnableDataCollectionScheduling
         DataCollectionScheduleExpression: !Ref DataCollectionScheduleExpression
         DataCollectionScheduleDescription: !Ref DataCollectionScheduleDescription
         DataCollectionScheduleTimezone: !Ref DataCollectionScheduleTimezone
+      Tags:
+        - Key: aria
+          Value: nested-stack
+        - Key: auto-delete
+          Value: "no"
+
+  # Access Analyzer State Machine Stack - polls IAM Access Analyzer findings
+  # on its own schedule, independent of AriaStateMachine's identity data
+  # collection cadence in StepFunctionsStack above.
+  AccessAnalyzerStateMachineStack:
+    Type: AWS::CloudFormation::Stack
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      TemplateURL: !Sub "https://${TemplatesBucketName}.s3.${AWS::Region}.amazonaws.com/access-analyzer-state-machine.yaml"
+      Parameters:
+        AccessAnalyzerPollerLambdaArn: !GetAtt LambdaStack.Outputs.AccessAnalyzerPollerLambdaArn
+        AccessAnalyzerUnusedDispatcherLambdaArn: !GetAtt LambdaStack.Outputs.AccessAnalyzerUnusedDispatcherLambdaArn
+        AriaSetupStackName: !Ref AWS::StackName
+        EnableAccessAnalyzerScheduling: !Ref EnableAccessAnalyzerScheduling
+        AccessAnalyzerScheduleExpression: !Ref AccessAnalyzerScheduleExpression
+        AccessAnalyzerScheduleDescription: !Ref AccessAnalyzerScheduleDescription
+        AccessAnalyzerScheduleTimezone: !Ref AccessAnalyzerScheduleTimezone
       Tags:
         - Key: aria
           Value: nested-stack
@@ -532,6 +713,24 @@ Outputs:
   GetIAMRolesLambdaFunctionExecutionRoleArn:
     Description: ARN of IAM role created for GetIAMRoles Lambda function
     Value: !GetAtt LambdaStack.Outputs.GetIAMRolesLambdaExecutionRoleArn
+  GetTrustPoliciesLambdaFunctionExecutionRoleArn:
+    Description: ARN of IAM role created for GetTrustPolicies Lambda function
+    Value: !GetAtt LambdaStack.Outputs.GetTrustPoliciesLambdaExecutionRoleArn
+  AccessAnalyzerPollerLambdaFunctionExecutionRoleArn:
+    Description: ARN of IAM role created for the internal and external AccessAnalyzerPoller Lambda function
+    Value: !GetAtt LambdaStack.Outputs.AccessAnalyzerPollerLambdaExecutionRoleArn
+  AccessAnalyzerUnusedDispatcherLambdaFunctionExecutionRoleArn:
+    Description: ARN of IAM role created for the unused IAM-role dispatcher Lambda function
+    Value: !GetAtt LambdaStack.Outputs.AccessAnalyzerUnusedDispatcherExecutionRoleArn
+  AccessAnalyzerUnusedWorkerLambdaFunctionExecutionRoleArn:
+    Description: ARN of IAM role created for the unused IAM-role detail worker Lambda function
+    Value: !GetAtt LambdaStack.Outputs.AccessAnalyzerUnusedWorkerExecutionRoleArn
+  UnusedRoleWorkQueueArn:
+    Description: ARN of the SQS queue holding unused IAM-role detail work
+    Value: !GetAtt LambdaStack.Outputs.UnusedRoleWorkQueueArn
+  UnusedRoleWorkDLQArn:
+    Description: ARN of the SQS dead-letter queue for failed unused IAM-role work
+    Value: !GetAtt LambdaStack.Outputs.UnusedRoleWorkDLQArn
   S3ExportLambdaFunctionArn:
     Description: "ARN of the S3Export Lambda function"
     Value: !GetAtt LambdaStack.Outputs.S3ExportLambdaArn
@@ -613,3 +812,14 @@ Outputs:
   DataCollectionScheduleExpression:
     Description: "Schedule expression for the AriaStateMachine data collection (if enabled)"
     Value: !Ref DataCollectionScheduleExpression
+
+  # Access Analyzer Scheduling Outputs
+  AriaAccessAnalyzerStateMachineArn:
+    Description: "ARN of the AriaAccessAnalyzerStateMachine for Access Analyzer polling"
+    Value: !GetAtt AccessAnalyzerStateMachineStack.Outputs.AccessAnalyzerStateMachineArn
+  AccessAnalyzerSchedulingEnabled:
+    Description: "Whether scheduling is enabled for the AriaAccessAnalyzerStateMachine"
+    Value: !GetAtt AccessAnalyzerStateMachineStack.Outputs.AccessAnalyzerSchedulingEnabled
+  AccessAnalyzerScheduleExpression:
+    Description: "Schedule expression for the AriaAccessAnalyzerStateMachine (if enabled)"
+    Value: !Ref AccessAnalyzerScheduleExpression

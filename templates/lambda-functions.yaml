@@ -26,13 +26,15 @@ Parameters:
     Type: String
   GetIAMRolesS3Key:
     Type: String
+  GetTrustPoliciesS3Key:
+    Type: String
   ListAccountAccessAssignmentsS3Key:
     Type: String
   S3ExportS3Key:
     Type: String
-  AccessAnalyzerFindingIngestionS3Key:
-    Type: String
   UpdateFunctionCodeS3Key:
+    Type: String
+  AccessAnalyzerPollerS3Key:
     Type: String
   PythonHandler:
     Type: String
@@ -41,6 +43,81 @@ Parameters:
   ManagementAccountId:
     Type: String
     Description: AWS Account ID of the Organizations management account (for KMS key access)
+  InternalAccessAnalyzerArn:
+    Type: String
+    Description: ARN of the ORGANIZATION_INTERNAL_ACCESS analyzer in the Delegated_Administrator_Account
+  ExternalAccessAnalyzerArn:
+    Type: String
+    Description: ARN of the ORGANIZATION analyzer in the Delegated_Administrator_Account
+  UnusedAccessAnalyzerArn:
+    Type: String
+    Description: ARN of the ORGANIZATION_UNUSED_ACCESS analyzer in the Delegated_Administrator_Account
+  DelegatedAdminAccountId:
+    Type: String
+    Description: AWS Account ID registered as the IAM Access Analyzer delegated administrator
+  AccessAnalyzerPollerRoleName:
+    Type: String
+    Default: AriaAccessAnalyzerPollerRole
+    Description: Name of the cross-account role in DelegatedAdminAccountId that this Lambda assumes
+  AccessAnalyzerPollerMaxPollAttempts:
+    Type: Number
+    Default: 6
+    MinValue: 1
+    MaxValue: 50
+    Description: >-
+      Max Step Functions re-invocations per finding family per Polling_Cycle
+      while a family still has unfetched changed/new findings (each attempt
+      is up to a 15-minute Lambda invocation). Raise temporarily for a large
+      initial backfill (e.g. 20-30 for 10k+ findings on first run), then
+      lower back to the default once the backlog is cleared.
+  AccessAnalyzerPollerRequestsPerSecond:
+    Type: Number
+    Default: 0.5
+    MinValue: 0.01
+    Description: >-
+      Fixed rate limit, in requests per second, applied between GetFindingV2
+      calls while reconciling internal and external finding families (default
+      0.5 RPS = 1 request every 2 seconds).
+  AccessAnalyzerDispatcherRoleName:
+    Type: String
+    Default: AriaAccessAnalyzerDispatcherRole
+    Description: Name of the cross-account delegated-admin role assumed by the unused-role dispatcher
+  AccessAnalyzerWorkerRoleName:
+    Type: String
+    Default: AriaAccessAnalyzerWorkerRole
+    Description: Name of the cross-account delegated-admin role assumed by the unused-role detail worker
+  UnusedRoleWorkerRequestsPerSecond:
+    Type: Number
+    Default: 0.5
+    MinValue: 0.01
+    Description: >-
+      Strict global GetFindingV2 rate limit for unused IAM-role findings. The
+      SQS worker has one reserved concurrent execution and an event-source
+      maximum concurrency of one, so this value applies account-wide.
+  UnusedRoleWorkerBatchSize:
+    Type: Number
+    Default: 10
+    MinValue: 1
+    MaxValue: 10
+    Description: Maximum SQS records delivered per unused-role worker invocation
+  UnusedRoleQueueVisibilityTimeoutSeconds:
+    Type: Number
+    Default: 600
+    MinValue: 120
+    MaxValue: 43200
+    Description: SQS work-message visibility timeout, in seconds
+  UnusedRoleQueueMaxReceiveCount:
+    Type: Number
+    Default: 5
+    MinValue: 1
+    MaxValue: 1000
+    Description: Receives before a failed unused-role work message is moved to the DLQ
+  UnusedRoleDispatcherLeaseSeconds:
+    Type: Number
+    Default: 900
+    MinValue: 60
+    MaxValue: 3600
+    Description: Lease duration that prevents overlapping unused-role dispatch runs
 
 Resources:
   # CreateTables Lambda
@@ -1285,6 +1362,7 @@ Resources:
               - !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/AriaIdCIAMRoles"
               - !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/AriaIdCProvisionedPermissionSets"
               - !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/AriaIdCAccounts"
+              - !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/AriaIdCIAMUsers"
           - Effect: Allow
             Action:
               - "organizations:ListAccounts"
@@ -1371,6 +1449,128 @@ Resources:
             comment: "Default CloudWatch Logs encryption is sufficient for this log group"
     Properties:
       LogGroupName: !Sub "/aws/lambda/${StackName}-GetIAMRoles-function"
+      RetentionInDays: 30
+      Tags:
+        - Key: aria
+          Value: log
+        - Key: auto-delete
+          Value: "no"
+
+  # GetTrustPolicies Lambda Execution Role
+  GetTrustPoliciesManagedPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - "s3:GetObject"
+            Resource: !Sub "arn:aws:s3:::${S3SourceBucketName}/${GetTrustPoliciesS3Key}"
+          - Effect: Allow
+            Action:
+              - "logs:CreateLogGroup"
+              - "logs:CreateLogStream"
+              - "logs:PutLogEvents"
+            Resource: !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/${StackName}-GetTrustPolicies-function:*"
+          - Effect: Allow
+            Action:
+              - "dynamodb:PutItem"
+              - "dynamodb:Scan"
+              - "dynamodb:UpdateItem"
+              - "dynamodb:DeleteItem"
+              - "dynamodb:BatchWriteItem"
+              - "dynamodb:GetItem"
+            Resource:
+              - !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/AriaIdCRoleTrustPolicies"
+          - Effect: Allow
+            Action:
+              - "dynamodb:Scan"
+              - "dynamodb:GetItem"
+            Resource:
+              - !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/AriaIdCIAMRoles"
+              - !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/AriaIdCAccountAccessAssignments"
+              - !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/AriaIdCAccounts"
+
+  GetTrustPoliciesExecutionRole:
+    Type: AWS::IAM::Role
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: "sts:AssumeRole"
+      ManagedPolicyArns:
+        - !Ref GetTrustPoliciesManagedPolicy
+      Tags:
+        - Key: aria
+          Value: role
+        - Key: auto-delete
+          Value: "no"
+
+  GetTrustPoliciesFunction:
+    Type: "AWS::Lambda::Function"
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: "VPC not required for this Lambda function accessing AWS services"
+      checkov:
+        skip:
+          - id: CKV_AWS_116
+            comment: "DLQ not required for this Lambda function as it's invoked by Step Functions with built-in error handling"
+          - id: CKV_AWS_173
+            comment: "Default Lambda environment variable encryption is sufficient for this function"
+          - id: CKV_AWS_117
+            comment: "VPC not required for this Lambda function accessing AWS services"
+    Properties:
+      FunctionName: !Sub "${StackName}-GetTrustPolicies-function"
+      Handler: !Ref PythonHandler
+      Role: !GetAtt GetTrustPoliciesExecutionRole.Arn
+      Code:
+        S3Bucket: !Ref S3SourceBucketName
+        S3Key: !Ref GetTrustPoliciesS3Key
+      Runtime: python3.13
+      Timeout: 900
+      MemorySize: 1024
+      Environment:
+        Variables:
+          STACK_NAME: !Ref StackName
+          PYTHON_PATH: "/var/task"
+      TracingConfig:
+        Mode: Active
+      Architectures:
+        - arm64
+      ReservedConcurrentExecutions: 3
+      Tags:
+        - Key: aria
+          Value: function
+        - Key: auto-delete
+          Value: "no"
+
+  GetTrustPoliciesLogGroup:
+    Type: "AWS::Logs::LogGroup"
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W84
+            reason: "Default CloudWatch Logs encryption is sufficient for this log group"
+      checkov:
+        skip:
+          - id: CKV_AWS_158
+            comment: "Default CloudWatch Logs encryption is sufficient for this log group"
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/${StackName}-GetTrustPolicies-function"
       RetentionInDays: 30
       Tags:
         - Key: aria
@@ -1628,20 +1828,11 @@ Resources:
         - Key: auto-delete
           Value: "no"
 
-  # AccessAnalyzerFindingIngestion Lambda
-  AccessAnalyzerFindingIngestionManagedPolicy:
+  # AccessAnalyzerPoller Lambda
+  AccessAnalyzerPollerManagedPolicy:
     Type: AWS::IAM::ManagedPolicy
     DeletionPolicy: Delete
     UpdateReplacePolicy: Delete
-    Metadata:
-      cfn_nag:
-        rules_to_suppress:
-          - id: W11
-            reason: "Access Analyzer service requires '*' resource for ListFindings operation across all analyzers"
-      checkov:
-        skip:
-          - id: CKV_AWS_107
-            comment: "IAM policy requires broad permissions for Access Analyzer operations, no credentials exposure risk"
     Properties:
       PolicyDocument:
         Version: "2012-10-17"
@@ -1649,31 +1840,54 @@ Resources:
           - Effect: Allow
             Action:
               - "s3:GetObject"
-            Resource: !Sub "arn:aws:s3:::${S3SourceBucketName}/${AccessAnalyzerFindingIngestionS3Key}"
+            Resource: !Sub "arn:aws:s3:::${S3SourceBucketName}/${AccessAnalyzerPollerS3Key}"
           - Effect: Allow
             Action:
               - "logs:CreateLogGroup"
               - "logs:CreateLogStream"
               - "logs:PutLogEvents"
-            Resource: !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/${StackName}-AccessAnalyzerFindingIngestion-function:*"
+            Resource: !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/${StackName}-AccessAnalyzerPoller-function:*"
+          # Cross-account assumption into the Delegated_Administrator_Account's
+          # poller role. Scoped to the specific role name/account rather than "*".
+          - Effect: Allow
+            Action:
+              - "sts:AssumeRole"
+            Resource: !Sub "arn:aws:iam::${DelegatedAdminAccountId}:role/${AccessAnalyzerPollerRoleName}"
+          # The legacy poller handles internal and external families only.
+          # Unused IAM-role findings use the separate dispatcher/worker roles
+          # below so ListFindings and GetFinding remain independently scoped.
+          - Effect: Allow
+            Action:
+              - "access-analyzer:ListFindings"
+              - "access-analyzer:GetFinding"
+            Resource:
+              - !Ref InternalAccessAnalyzerArn
+              - !Ref ExternalAccessAnalyzerArn
+          # PutItem/DeleteItem are no longer called directly (reconcile_family
+          # writes through table.batch_writer(), which issues BatchWriteItem),
+          # but are kept here since batch_writer's own retry-of-UnprocessedItems
+          # path and any direct single-item call remain permitted at no extra
+          # privilege cost - both actions are already scoped to these three
+          # tables and were previously granted for the same operations.
           - Effect: Allow
             Action:
               - "dynamodb:PutItem"
-              - "dynamodb:UpdateItem"
               - "dynamodb:DeleteItem"
+              - "dynamodb:BatchWriteItem"
+              - "dynamodb:Scan"
             Resource:
               - !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/AriaIdCInternalAAFindings"
               - !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/AriaIdCUnusedAAFindings"
               - !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/AriaIdCExternalAAFindings"
-          # Read-only scan of the AAM entitlements table so unused-access findings
-          # can be scoped to Account Access Manager roles (in addition to SSO roles).
+          # Read-only scan for Tracked_Role membership (Account Access Manager
+          # entitlements), same permission the retired ingestion Lambda held.
           - Effect: Allow
             Action:
               - "dynamodb:Scan"
             Resource:
               - !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/AriaIdCAccountAccessAssignments"
 
-  AccessAnalyzerFindingIngestionRole:
+  AccessAnalyzerPollerRole:
     Type: AWS::IAM::Role
     DeletionPolicy: Delete
     UpdateReplacePolicy: Delete
@@ -1686,14 +1900,14 @@ Resources:
               Service: lambda.amazonaws.com
             Action: "sts:AssumeRole"
       ManagedPolicyArns:
-        - !Ref AccessAnalyzerFindingIngestionManagedPolicy
+        - !Ref AccessAnalyzerPollerManagedPolicy
       Tags:
         - Key: aria
           Value: role
         - Key: auto-delete
           Value: "no"
 
-  AccessAnalyzerFindingIngestionFunction:
+  AccessAnalyzerPollerFunction:
     Type: "AWS::Lambda::Function"
     DeletionPolicy: Delete
     UpdateReplacePolicy: Delete
@@ -1711,19 +1925,26 @@ Resources:
           - id: CKV_AWS_117
             comment: "VPC not required for this Lambda function accessing AWS services"
     Properties:
-      FunctionName: !Sub "${StackName}-AccessAnalyzerFindingIngestion-function"
+      FunctionName: !Sub "${StackName}-AccessAnalyzerPoller-function"
       Handler: !Ref PythonHandler
-      Role: !GetAtt AccessAnalyzerFindingIngestionRole.Arn
+      Role: !GetAtt AccessAnalyzerPollerRole.Arn
       Code:
         S3Bucket: !Ref S3SourceBucketName
-        S3Key: !Ref AccessAnalyzerFindingIngestionS3Key
+        S3Key: !Ref AccessAnalyzerPollerS3Key
       Runtime: python3.13
-      Timeout: 300
-      MemorySize: 256
+      Timeout: 900
+      MemorySize: 1024
       Environment:
         Variables:
           STACK_NAME: !Ref StackName
           PYTHON_PATH: "/var/task"
+          DELEGATED_ADMIN_ACCOUNT_ID: !Ref DelegatedAdminAccountId
+          POLLER_ROLE_NAME: !Ref AccessAnalyzerPollerRoleName
+          MAX_POLL_ATTEMPTS_PER_FAMILY: !Ref AccessAnalyzerPollerMaxPollAttempts
+          FINDING_FETCH_RATE_LIMIT_RPS: !Ref AccessAnalyzerPollerRequestsPerSecond
+          INTERNAL_ACCESS_ANALYZER_ARN: !Ref InternalAccessAnalyzerArn
+          EXTERNAL_ACCESS_ANALYZER_ARN: !Ref ExternalAccessAnalyzerArn
+          UNUSED_ACCESS_ANALYZER_ARN: !Ref UnusedAccessAnalyzerArn
       TracingConfig:
         Mode: Active
       Architectures:
@@ -1735,7 +1956,7 @@ Resources:
         - Key: auto-delete
           Value: "no"
 
-  AccessAnalyzerFindingIngestionLogGroup:
+  AccessAnalyzerPollerLogGroup:
     Type: "AWS::Logs::LogGroup"
     DeletionPolicy: Delete
     UpdateReplacePolicy: Delete
@@ -1749,13 +1970,369 @@ Resources:
           - id: CKV_AWS_158
             comment: "Default CloudWatch Logs encryption is sufficient for this log group"
     Properties:
-      LogGroupName: !Sub "/aws/lambda/${StackName}-AccessAnalyzerFindingIngestion-function"
+      LogGroupName: !Sub "/aws/lambda/${StackName}-AccessAnalyzerPoller-function"
       RetentionInDays: 30
       Tags:
         - Key: aria
           Value: log
         - Key: auto-delete
           Value: "no"
+
+  # Durable state, queue, and functions for unused IAM-role finding processing.
+  # This state table is a CloudFormation resource rather than a CreateTables
+  # Lambda table because Access Analyzer scheduling can run before the main
+  # identity data-collection state machine creates its dynamic tables.
+  UnusedRoleWorkStateTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      TableName: AriaIdCUnusedAAWorkState
+      AttributeDefinitions:
+        - AttributeName: WorkKey
+          AttributeType: S
+      KeySchema:
+        - AttributeName: WorkKey
+          KeyType: HASH
+      BillingMode: PAY_PER_REQUEST
+      SSESpecification:
+        SSEEnabled: true
+        SSEType: KMS
+      Tags:
+        - Key: aria
+          Value: data
+        - Key: auto-delete
+          Value: "no"
+
+  UnusedRoleWorkDLQ:
+    Type: AWS::SQS::Queue
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W48
+            reason: "SQS-managed encryption is enabled with SqsManagedSseEnabled"
+      checkov:
+        skip:
+          - id: CKV_AWS_27
+            comment: "SQS-managed encryption is enabled with SqsManagedSseEnabled"
+    Properties:
+      QueueName: !Sub "${StackName}-UnusedAAWork-DLQ"
+      MessageRetentionPeriod: 1209600
+      SqsManagedSseEnabled: true
+      Tags:
+        - Key: aria
+          Value: dlq
+        - Key: auto-delete
+          Value: "no"
+
+  UnusedRoleWorkQueue:
+    Type: AWS::SQS::Queue
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W48
+            reason: "SQS-managed encryption is enabled with SqsManagedSseEnabled"
+      checkov:
+        skip:
+          - id: CKV_AWS_27
+            comment: "SQS-managed encryption is enabled with SqsManagedSseEnabled"
+    Properties:
+      QueueName: !Sub "${StackName}-UnusedAAWork"
+      MessageRetentionPeriod: 1209600
+      VisibilityTimeout: !Ref UnusedRoleQueueVisibilityTimeoutSeconds
+      SqsManagedSseEnabled: true
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt UnusedRoleWorkDLQ.Arn
+        maxReceiveCount: !Ref UnusedRoleQueueMaxReceiveCount
+      Tags:
+        - Key: aria
+          Value: queue
+        - Key: auto-delete
+          Value: "no"
+
+  AccessAnalyzerUnusedDispatcherManagedPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - s3:GetObject
+            Resource: !Sub "arn:aws:s3:::${S3SourceBucketName}/${AccessAnalyzerPollerS3Key}"
+          - Effect: Allow
+            Action:
+              - logs:CreateLogGroup
+              - logs:CreateLogStream
+              - logs:PutLogEvents
+            Resource: !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/${StackName}-AccessAnalyzerUnusedDispatcher-function:*"
+          - Effect: Allow
+            Action:
+              - sts:AssumeRole
+            Resource: !Sub "arn:aws:iam::${DelegatedAdminAccountId}:role/${AccessAnalyzerDispatcherRoleName}"
+          - Effect: Allow
+            Action:
+              - access-analyzer:ListFindings
+            Resource: !Ref UnusedAccessAnalyzerArn
+          - Effect: Allow
+            Action:
+              - sqs:SendMessage
+            Resource: !GetAtt UnusedRoleWorkQueue.Arn
+          - Effect: Allow
+            Action:
+              - dynamodb:BatchGetItem
+              - dynamodb:UpdateItem
+            Resource: !GetAtt UnusedRoleWorkStateTable.Arn
+          - Effect: Allow
+            Action:
+              - dynamodb:BatchWriteItem
+              - dynamodb:Scan
+            Resource: !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/AriaIdCUnusedAAFindings"
+          - Effect: Allow
+            Action:
+              - dynamodb:Scan
+            Resource: !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/AriaIdCAccountAccessAssignments"
+
+  AccessAnalyzerUnusedDispatcherRole:
+    Type: AWS::IAM::Role
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - !Ref AccessAnalyzerUnusedDispatcherManagedPolicy
+      Tags:
+        - Key: aria
+          Value: role
+        - Key: auto-delete
+          Value: "no"
+
+  AccessAnalyzerUnusedDispatcherFunction:
+    Type: AWS::Lambda::Function
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: "VPC not required for this Lambda function accessing AWS services"
+      checkov:
+        skip:
+          - id: CKV_AWS_173
+            comment: "Default Lambda environment variable encryption is sufficient for this function"
+          - id: CKV_AWS_117
+            comment: "VPC not required for this Lambda function accessing AWS services"
+    Properties:
+      FunctionName: !Sub "${StackName}-AccessAnalyzerUnusedDispatcher-function"
+      Handler: unused_role_pipeline.unused_role_dispatcher_handler
+      Role: !GetAtt AccessAnalyzerUnusedDispatcherRole.Arn
+      Code:
+        S3Bucket: !Ref S3SourceBucketName
+        S3Key: !Ref AccessAnalyzerPollerS3Key
+      Runtime: python3.13
+      Timeout: 900
+      MemorySize: 1024
+      Environment:
+        Variables:
+          DELEGATED_ADMIN_ACCOUNT_ID: !Ref DelegatedAdminAccountId
+          POLLER_ROLE_NAME: !Ref AccessAnalyzerDispatcherRoleName
+          INTERNAL_ACCESS_ANALYZER_ARN: !Ref InternalAccessAnalyzerArn
+          EXTERNAL_ACCESS_ANALYZER_ARN: !Ref ExternalAccessAnalyzerArn
+          UNUSED_ACCESS_ANALYZER_ARN: !Ref UnusedAccessAnalyzerArn
+          UNUSED_ROLE_WORK_QUEUE_URL: !Ref UnusedRoleWorkQueue
+          UNUSED_ROLE_WORK_STATE_TABLE: !Ref UnusedRoleWorkStateTable
+          UNUSED_ROLE_DISPATCH_LEASE_SECONDS: !Ref UnusedRoleDispatcherLeaseSeconds
+      TracingConfig:
+        Mode: Active
+      Architectures:
+        - arm64
+      ReservedConcurrentExecutions: 1
+      Tags:
+        - Key: aria
+          Value: function
+        - Key: auto-delete
+          Value: "no"
+
+  AccessAnalyzerUnusedDispatcherLogGroup:
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W84
+            reason: "Default CloudWatch Logs encryption is sufficient for this log group"
+      checkov:
+        skip:
+          - id: CKV_AWS_158
+            comment: "Default CloudWatch Logs encryption is sufficient for this log group"
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/${StackName}-AccessAnalyzerUnusedDispatcher-function"
+      RetentionInDays: 30
+      Tags:
+        - Key: aria
+          Value: log
+        - Key: auto-delete
+          Value: "no"
+
+  AccessAnalyzerUnusedWorkerManagedPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - s3:GetObject
+            Resource: !Sub "arn:aws:s3:::${S3SourceBucketName}/${AccessAnalyzerPollerS3Key}"
+          - Effect: Allow
+            Action:
+              - logs:CreateLogGroup
+              - logs:CreateLogStream
+              - logs:PutLogEvents
+            Resource: !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/${StackName}-AccessAnalyzerUnusedWorker-function:*"
+          - Effect: Allow
+            Action:
+              - sts:AssumeRole
+            Resource: !Sub "arn:aws:iam::${DelegatedAdminAccountId}:role/${AccessAnalyzerWorkerRoleName}"
+          - Effect: Allow
+            Action:
+              - access-analyzer:GetFinding
+            Resource: !Ref UnusedAccessAnalyzerArn
+          - Effect: Allow
+            Action:
+              - sqs:ChangeMessageVisibility
+              - sqs:DeleteMessage
+              - sqs:GetQueueAttributes
+              - sqs:ReceiveMessage
+            Resource: !GetAtt UnusedRoleWorkQueue.Arn
+          - Effect: Allow
+            Action:
+              - dynamodb:DeleteItem
+              - dynamodb:GetItem
+              - dynamodb:PutItem
+            Resource: !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/AriaIdCUnusedAAFindings"
+          - Effect: Allow
+            Action:
+              - dynamodb:Scan
+            Resource: !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/AriaIdCAccountAccessAssignments"
+
+  AccessAnalyzerUnusedWorkerRole:
+    Type: AWS::IAM::Role
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - !Ref AccessAnalyzerUnusedWorkerManagedPolicy
+      Tags:
+        - Key: aria
+          Value: role
+        - Key: auto-delete
+          Value: "no"
+
+  AccessAnalyzerUnusedWorkerFunction:
+    Type: AWS::Lambda::Function
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: "VPC not required for this Lambda function accessing AWS services"
+      checkov:
+        skip:
+          - id: CKV_AWS_173
+            comment: "Default Lambda environment variable encryption is sufficient for this function"
+          - id: CKV_AWS_117
+            comment: "VPC not required for this Lambda function accessing AWS services"
+    Properties:
+      FunctionName: !Sub "${StackName}-AccessAnalyzerUnusedWorker-function"
+      Handler: unused_role_pipeline.unused_role_detail_worker_handler
+      Role: !GetAtt AccessAnalyzerUnusedWorkerRole.Arn
+      Code:
+        S3Bucket: !Ref S3SourceBucketName
+        S3Key: !Ref AccessAnalyzerPollerS3Key
+      Runtime: python3.13
+      Timeout: 120
+      MemorySize: 1024
+      Environment:
+        Variables:
+          DELEGATED_ADMIN_ACCOUNT_ID: !Ref DelegatedAdminAccountId
+          POLLER_ROLE_NAME: !Ref AccessAnalyzerWorkerRoleName
+          INTERNAL_ACCESS_ANALYZER_ARN: !Ref InternalAccessAnalyzerArn
+          EXTERNAL_ACCESS_ANALYZER_ARN: !Ref ExternalAccessAnalyzerArn
+          UNUSED_ACCESS_ANALYZER_ARN: !Ref UnusedAccessAnalyzerArn
+          UNUSED_ROLE_WORK_QUEUE_URL: !Ref UnusedRoleWorkQueue
+          UNUSED_ROLE_WORK_STATE_TABLE: !Ref UnusedRoleWorkStateTable
+          UNUSED_ROLE_WORKER_RPS: !Ref UnusedRoleWorkerRequestsPerSecond
+      TracingConfig:
+        Mode: Active
+      Architectures:
+        - arm64
+      ReservedConcurrentExecutions: 1
+      Tags:
+        - Key: aria
+          Value: function
+        - Key: auto-delete
+          Value: "no"
+
+  AccessAnalyzerUnusedWorkerLogGroup:
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W84
+            reason: "Default CloudWatch Logs encryption is sufficient for this log group"
+      checkov:
+        skip:
+          - id: CKV_AWS_158
+            comment: "Default CloudWatch Logs encryption is sufficient for this log group"
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/${StackName}-AccessAnalyzerUnusedWorker-function"
+      RetentionInDays: 30
+      Tags:
+        - Key: aria
+          Value: log
+        - Key: auto-delete
+          Value: "no"
+
+  AccessAnalyzerUnusedWorkerEventSource:
+    Type: AWS::Lambda::EventSourceMapping
+    DependsOn:
+      - AccessAnalyzerUnusedWorkerManagedPolicy
+    Properties:
+      EventSourceArn: !GetAtt UnusedRoleWorkQueue.Arn
+      FunctionName: !Ref AccessAnalyzerUnusedWorkerFunction
+      Enabled: true
+      BatchSize: !Ref UnusedRoleWorkerBatchSize
+      MaximumBatchingWindowInSeconds: 0
+      FunctionResponseTypes:
+        - ReportBatchItemFailures
+      # Reserved concurrency on the worker Lambda is one, which enforces the
+      # strict global RPS without a conflicting event-source concurrency cap.
 
   # UpdateFunctionCode Lambda
   UpdateFunctionCodeManagedPolicy:
@@ -1912,6 +2489,12 @@ Outputs:
     Value: !Ref GetIAMRolesFunction
   GetIAMRolesLambdaExecutionRoleArn:
     Value: !GetAtt GetIAMRolesExecutionRole.Arn
+  GetTrustPoliciesLambdaArn:
+    Value: !GetAtt GetTrustPoliciesFunction.Arn
+  GetTrustPoliciesLambdaName:
+    Value: !Ref GetTrustPoliciesFunction
+  GetTrustPoliciesLambdaExecutionRoleArn:
+    Value: !GetAtt GetTrustPoliciesExecutionRole.Arn
   ListAccountAccessAssignmentsLambdaArn:
     Value: !GetAtt ListAccountAccessAssignmentsFunction.Arn
   ListAccountAccessAssignmentsLambdaName:
@@ -1920,10 +2503,26 @@ Outputs:
     Value: !GetAtt S3ExportFunction.Arn
   S3ExportLambdaName:
     Value: !Ref S3ExportFunction
-  AccessAnalyzerFindingIngestionLambdaArn:
-    Value: !GetAtt AccessAnalyzerFindingIngestionFunction.Arn
-  AccessAnalyzerFindingIngestionLambdaName:
-    Value: !Ref AccessAnalyzerFindingIngestionFunction
+  AccessAnalyzerPollerLambdaArn:
+    Value: !GetAtt AccessAnalyzerPollerFunction.Arn
+  AccessAnalyzerPollerLambdaExecutionRoleArn:
+    Value: !GetAtt AccessAnalyzerPollerRole.Arn
+  AccessAnalyzerUnusedDispatcherLambdaArn:
+    Value: !GetAtt AccessAnalyzerUnusedDispatcherFunction.Arn
+  AccessAnalyzerUnusedDispatcherExecutionRoleArn:
+    Value: !GetAtt AccessAnalyzerUnusedDispatcherRole.Arn
+  AccessAnalyzerUnusedWorkerLambdaArn:
+    Value: !GetAtt AccessAnalyzerUnusedWorkerFunction.Arn
+  AccessAnalyzerUnusedWorkerExecutionRoleArn:
+    Value: !GetAtt AccessAnalyzerUnusedWorkerRole.Arn
+  UnusedRoleWorkQueueArn:
+    Value: !GetAtt UnusedRoleWorkQueue.Arn
+  UnusedRoleWorkQueueUrl:
+    Value: !Ref UnusedRoleWorkQueue
+  UnusedRoleWorkStateTableName:
+    Value: !Ref UnusedRoleWorkStateTable
+  UnusedRoleWorkDLQArn:
+    Value: !GetAtt UnusedRoleWorkDLQ.Arn
   UpdateFunctionCodeLambdaArn:
     Value: !GetAtt UpdateFunctionCodeFunction.Arn
   UpdateFunctionCodeLambdaName:

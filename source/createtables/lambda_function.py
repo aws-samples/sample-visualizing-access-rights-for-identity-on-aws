@@ -93,6 +93,17 @@ def create_tables(dynamodb):
                 {'AttributeName': 'IamRoleArn', 'AttributeType': 'S'}
             ]
         },
+        'AriaIdCIAMUsers': {
+            # Standard AriaIdC* naming so it matches the table/AriaIdC* IAM
+            # resource wildcard. Inherits PAY_PER_REQUEST billing, KMS SSE, and
+            # the aria/auto-delete tags via the shared create_table call below.
+            'KeySchema': [
+                {'AttributeName': 'IamUserArn', 'KeyType': 'HASH'}
+            ],
+            'AttributeDefinitions': [
+                {'AttributeName': 'IamUserArn', 'AttributeType': 'S'}
+            ]
+        },
         'AriaIdCInternalAAFindings': {
             'KeySchema': [
                 {'AttributeName': 'FindingId', 'KeyType': 'HASH'}
@@ -130,6 +141,20 @@ def create_tables(dynamodb):
             'AttributeDefinitions': [
                 {'AttributeName': 'PrincipalId', 'AttributeType': 'S'},
                 {'AttributeName': 'IamRoleArn', 'AttributeType': 'S'}
+            ]
+        },
+        'AriaIdCRoleTrustPolicies': {
+            # Composite key (RoleArn, PrincipalArn) keeps one row per (role,
+            # trusting principal) pair. Both key components are stored so the graph
+            # export can project them directly as edge endpoints, mirroring
+            # AriaIdCAccountAccessAssignments.
+            'KeySchema': [
+                {'AttributeName': 'RoleArn', 'KeyType': 'HASH'},
+                {'AttributeName': 'PrincipalArn', 'KeyType': 'RANGE'}
+            ],
+            'AttributeDefinitions': [
+                {'AttributeName': 'RoleArn', 'AttributeType': 'S'},
+                {'AttributeName': 'PrincipalArn', 'AttributeType': 'S'}
             ]
         }
     }

@@ -38,9 +38,9 @@ Parameters:
   S3ExportS3Key:
     Type: String
     Description: S3 key for S3Export Lambda function
-  AccessAnalyzerFindingIngestionS3Key:
+  AccessAnalyzerPollerS3Key:
     Type: String
-    Description: S3 key for AccessAnalyzerFindingIngestion Lambda function
+    Description: S3 key for AccessAnalyzerPoller Lambda function
   UpdateFunctionCodeS3Key:
     Type: String
     Description: S3 key for UpdateFunctionCode Lambda function
@@ -82,9 +82,9 @@ Parameters:
   S3ExportLambdaArn:
     Type: String
     Description: ARN of S3Export Lambda function
-  AccessAnalyzerFindingIngestionLambdaArn:
+  AccessAnalyzerPollerLambdaArn:
     Type: String
-    Description: ARN of AccessAnalyzerFindingIngestion Lambda function
+    Description: ARN of AccessAnalyzerPoller Lambda function
   UpdateFunctionCodeLambdaArn:
     Type: String
     Description: ARN of UpdateFunctionCode Lambda function
@@ -277,7 +277,7 @@ Resources:
       Tags:
         aria: ssm
 
-  AccessAnalyzerFindingIngestionLambdaArnSSMParameter:
+  AccessAnalyzerPollerLambdaArnSSMParameter:
     Type: AWS::SSM::Parameter
     Properties:
       Name:
@@ -285,12 +285,12 @@ Resources:
           "",
           [
             "/aria/lambda/",
-            !Select [0, !Split [".", !Ref AccessAnalyzerFindingIngestionS3Key]],
+            !Select [0, !Split [".", !Ref AccessAnalyzerPollerS3Key]],
           ],
         ]
       Type: String
-      Value: !Ref AccessAnalyzerFindingIngestionLambdaArn
-      Description: !Sub "ARN for Lambda function ${AccessAnalyzerFindingIngestionS3Key}"
+      Value: !Ref AccessAnalyzerPollerLambdaArn
+      Description: !Sub "ARN for Lambda function ${AccessAnalyzerPollerS3Key}"
       Tags:
         aria: ssm
 
@@ -348,9 +348,9 @@ Outputs:
   S3ExportSSMParameterName:
     Description: Name of SSM parameter for S3Export Lambda ARN
     Value: !Ref S3ExportLambdaArnSSMParameter
-  AccessAnalyzerFindingIngestionSSMParameterName:
-    Description: Name of SSM parameter for AccessAnalyzerFindingIngestion Lambda ARN
-    Value: !Ref AccessAnalyzerFindingIngestionLambdaArnSSMParameter
+  AccessAnalyzerPollerSSMParameterName:
+    Description: Name of SSM parameter for AccessAnalyzerPoller Lambda ARN
+    Value: !Ref AccessAnalyzerPollerLambdaArnSSMParameter
   UpdateFunctionCodeSSMParameterName:
     Description: Name of SSM parameter for UpdateFunctionCode Lambda ARN
     Value: !Ref UpdateFunctionCodeLambdaArnSSMParameter
