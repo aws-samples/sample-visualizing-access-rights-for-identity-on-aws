@@ -83,10 +83,12 @@ If you prefer manual control:
      --parameter-overrides DeployNeptune=true \
      --capabilities CAPABILITY_IAM
    ```
-2. **Create cross-account IAM roles** (see step 1 above).
-3. **Execute the state machines** in AWS Step Functions:
+2. **Deploy the main ARIA-gv stack** with the enhanced deployment script or CloudFormation.
+3. **For a cross-account IAM Access Analyzer delegated administrator**, deploy the three matching Access Analyzer roles after the main stack exposes the Lambda execution-role ARNs. Follow [delegated-admin-role-setup.md](../source/accessanalyzerpoller/delegated-admin-role-setup.md). Same-account deployments do not need this step.
+4. **Execute the state machines** in AWS Step Functions:
    1. `AriaStateMachine` (collects identity data)
    2. `AriaExportGraphStateMachine` (exports to Neptune)
+   3. `AriaAccessAnalyzerStateMachine` (polls Access Analyzer findings, independent of the other two)
 
    Or enable automatic scheduling to run these for you.
 

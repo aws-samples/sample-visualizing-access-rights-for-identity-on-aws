@@ -8,13 +8,14 @@ Run this in the Management account to deploy a CloudFormation stackset that will
 
 **NOTE:**
 * Replace `<delegated-IdC-management-account-id>` with the 12-digit account ID that you have nominated as the administration account for AWS IAM Identity Center
-* Replace `<arn-getiamroles-lambda-execution-role>` with the IAM Role Arn for the GetIamRoles Lambda function - see the CloudFormation output of the Aria-Setup stack for the required Arn
+* Replace `<arn-getiamroles-lambda-execution-role>` with the IAM Role Arn for the GetIamRoles Lambda function - see the CloudFormation output of the Aria-Setup stack for `GetIAMRolesLambdaFunctionExecutionRoleArn`
+* Replace `<arn-gettrustpolicies-lambda-execution-role>` with the IAM Role Arn for the GetTrustPolicies Lambda function - see the CloudFormation output of the Aria-Setup stack for `GetTrustPoliciesLambdaFunctionExecutionRoleArn`
 
 ```
 aws cloudformation create-stack-set \
   --stack-set-name aria-orglevel-iamlistroles \
   --template-body file://idc-iam-inventory-role.yaml \
-  --parameters ParameterKey=TrustedAccountId,ParameterValue=<delegated-IdC-management-account-id> ParameterKey=IAMRolesLambdaCrossAccountRole,ParameterValue=<arn-getiamroles-lambda-execution-role> \
+  --parameters ParameterKey=TrustedAccountId,ParameterValue=<delegated-IdC-management-account-id> ParameterKey=IAMRolesLambdaCrossAccountRole,ParameterValue=<arn-getiamroles-lambda-execution-role> ParameterKey=TrustPoliciesLambdaCrossAccountRole,ParameterValue=<arn-gettrustpolicies-lambda-execution-role> \
   --permission-model SERVICE_MANAGED \
   --auto-deployment Enabled=true,RetainStacksOnAccountRemoval=false \
   --capabilities CAPABILITY_NAMED_IAM
@@ -39,4 +40,5 @@ In the management account you must manually deploy the cloudformation stack usin
 
 **Note:**
 * Replace `arn:aws:iam::<01234567890>:role/<stack-name>-GetIAMRolesLambdaExecutionRole-<randomchars>` in the CloudFormation parameter screen with the IAM Role Arn for the GetIamRoles Lambda function - see the CloudFormation output for `GetIAMRolesLambdaFunctionExecutionRoleArn` for the required Arn
+* Replace `arn:aws:iam::<01234567890>:role/<stack-name>-GetTrustPoliciesExecutionRole-<randomchars>` in the CloudFormation parameter screen with the IAM Role Arn for the GetTrustPolicies Lambda function - see the CloudFormation output for `GetTrustPoliciesLambdaFunctionExecutionRoleArn` for the required Arn
 

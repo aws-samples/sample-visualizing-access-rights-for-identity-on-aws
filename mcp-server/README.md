@@ -13,16 +13,18 @@ It runs as a managed, remote endpoint on **Amazon Bedrock AgentCore Runtime**, d
 
 ## Tools
 
-| Tool                    | Purpose                                                              |
-| ----------------------- | -------------------------------------------------------------------- |
-| `describe_graph_schema` | Return the node/edge model and property names                        |
-| `find_access_paths`     | How a user reaches a resource (optional action filter)               |
-| `who_can_access`        | Every principal that can reach a resource                            |
-| `get_principal_access`  | Full access report for one user                                      |
-| `find_unused_access`    | Roles with unused-access findings, worst first                       |
-| `list_entities`         | List users / groups / permission sets / accounts / roles / resources |
-| `graph_summary`         | Node counts per label (also a connectivity check)                    |
-| `execute_cypher`        | Run an arbitrary read-only openCypher query                          |
+| Tool                           | Purpose                                                                                                                        |
+| ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------ |
+| `describe_graph_schema`        | Return the node/edge model and property names                                                                                  |
+| `find_access_paths`            | How a user reaches a resource (permission set, direct role, or role chaining; optional action filter)                          |
+| `who_can_access`               | Every principal that can reach a resource (permission set, direct role, or role chaining)                                      |
+| `get_principal_access`         | Full access report for one user (permission set, direct role, or role chaining)                                                |
+| `get_principal_access_summary` | Compact roll-up of what a user can reach, grouped by route and grant (permission set, direct role, or role chaining)           |
+| `find_unused_access`           | Roles with unused-access findings, worst first                                                                                 |
+| `find_role_assumption_paths`   | Trace IAM role-assumption chains over CAN_ASSUME trust edges (backward: who can assume a role; forward: what a role can reach) |
+| `list_entities`                | List users / groups / permission sets / accounts / roles / assumable roles / resources                                         |
+| `graph_summary`                | Node counts per label (also a connectivity check)                                                                              |
+| `execute_cypher`               | Run an arbitrary read-only openCypher query                                                                                    |
 
 All tools are read-only. Mutating clauses (`CREATE`, `MERGE`, `SET`, `DELETE`,`REMOVE`, `DETACH`, `DROP`, `LOAD`) are rejected, and user values are passed as openCypher parameters rather than string-interpolated.
 

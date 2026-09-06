@@ -87,7 +87,8 @@ LAMBDA_FUNCTIONS=(
   "listgroupaccountassignments"
   "listaccountaccessassignments"
   "getiamroles"
-  "accessanalyzerfindingingestion"
+  "gettrustpolicies"
+  "accessanalyzerpoller"
   "s3export"
   "updatefunctioncode"
 )
@@ -129,7 +130,10 @@ for func in "${LAMBDA_FUNCTIONS[@]}"; do
     (cd "$BUILD_DIR" && zip -r "$ZIP_DIR/${func}.zip" . -x "*__pycache__*" -x "*.pyc" -x "bin/*" > /dev/null)
     rm -rf "$BUILD_DIR"
   else
-    zip -j "./zip/${func}.zip" "./source/${func}/lambda_function.py"
+    # Most functions contain only lambda_function.py. The Access Analyzer
+    # package also contains unused_role_pipeline.py for its dispatcher and
+    # SQS worker handlers, so include every top-level Python module.
+    zip -j "./zip/${func}.zip" "./source/${func}/"*.py
   fi
 done
 

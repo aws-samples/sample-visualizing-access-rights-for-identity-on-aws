@@ -78,6 +78,17 @@ Edges (from -> to):
 - (RoleName)-[:HAS_UNUSED_ACCESS]->(UnusedAccessFinding)
 - (ExternalAccessFinding)-[:LINKED_TO]->(ExternalPrincipal | CriticalResources)
 - (ExternalPrincipal)-[:HAS_EXTERNAL_ACCESS_TO]->(CriticalResources)
+- (UserName|RoleName)-[:CAN_ASSUME]->(RoleName)   # trust policy: source principal may assume target role
+
+CAN_ASSUME encodes IAM trust policies: `~from` is a principal ARN and `~to` is
+the trusted (target) role ARN. RoleName nodes are keyed on the IAM role ARN, so
+role-to-role CAN_ASSUME edges connect to EXISTING RoleName nodes and can chain
+multiple hops (multi-hop role chaining). A trusting-USER ARN does NOT line up
+with an existing UserName node (those are keyed on UserId) and instead attaches
+to a standalone ARN-keyed node. CAN_ASSUME covers IAM role and IAM user
+principals only - service, account-root, wildcard, and federated (SAML/OIDC)
+principals are excluded. STS assumed-role ARNs were normalized to their
+underlying IAM role ARN so they match the RoleName node `~id`.
 
 External access is the inverse direction of the internal model: an
 ExternalPrincipal (outside the zone of trust) reaches an internal
@@ -99,6 +110,15 @@ sets:
 In both routes the group hop is optional - a user can be assigned directly. When
 answering "who can access" / "how can X access", cover BOTH routes (UNION them)
 unless asked about one specifically.
+
+Role chaining is now part of the resource-access answers: find_access_paths,
+who_can_access, get_principal_access, and get_principal_access_summary each
+UNION in a third route, tagged access_via = "role_chain", that reaches the
+granting role by assuming onward one or more CAN_ASSUME hops from a role the
+principal already reaches directly or via a permission set. Use the dedicated
+find_role_assumption_paths tool instead when the question is specifically about
+role-to-role assumption chains between two role endpoints, independent of any
+critical resource.
 
 What a principal can DO to a resource lives on InternalAccessFinding.action, not
 on the edge. Filter on that property for verbs like update / write / delete.
@@ -122,7 +142,10 @@ def describe_graph_schema() -> str:
 
 @mcp.tool()
 def find_access_paths(
-    principal: str, resource: str, actions: list[str] | None = None
+    principal: str,
+    resource: str,
+    actions: list[str] | None = None,
+    max_hops: int = 5,
 ) -> dict[str, Any]:
     """Show HOW a user can reach a critical resource (the "how was Bob able to
     update this resource" question).
@@ -134,20 +157,26 @@ def find_access_paths(
     for direct-role access), the IAM role, the role's `source`, and the finding
     actions that permit it.
 
+    Also covers a third route, role_chain: reaching the granting role by
+    assuming onward one or more CAN_ASSUME hops from a role the principal
+    already reaches directly or via a permission set.
+
     Args:
         principal: user name or a substring of it (case-insensitive match).
         resource: resource ARN or a substring of it (e.g. a bucket name).
         actions: optional list of action substrings to require, e.g.
             ["put", "delete", "update"] to answer "how could they UPDATE it".
             Omit for any access. Use WRITE_ACTION_HINTS-style verbs.
+        max_hops: max CAN_ASSUME chain length for the role_chain route
+            (default 5, capped at 10). Ignored by the other two routes.
     """
-    query, params = queries.find_access_paths(principal, resource, actions)
+    query, params = queries.find_access_paths(principal, resource, actions, max_hops)
     return _run(query, params)
 
 
 @mcp.tool()
 def who_can_access(
-    resource: str, actions: list[str] | None = None
+    resource: str, actions: list[str] | None = None, max_hops: int = 5
 ) -> dict[str, Any]:
     """List every human principal (users, directly or via groups) that can reach
     a resource, across BOTH access routes: IAM Identity Center permission sets
@@ -156,18 +185,24 @@ def who_can_access(
     Returns one row per (principal, role, route); the `access_via` field tags
     each as permission_set or direct_role.
 
+    Also covers a third route, role_chain: reaching the granting role by
+    assuming onward one or more CAN_ASSUME hops from a role the principal
+    already reaches directly or via a permission set.
+
     Args:
         resource: resource ARN or substring.
         actions: optional action-substring filter, e.g. ["delete"] for "who can
             delete this". Omit for any access.
+        max_hops: max CAN_ASSUME chain length for the role_chain route
+            (default 5, capped at 10). Ignored by the other two routes.
     """
-    query, params = queries.who_can_access(resource, actions)
+    query, params = queries.who_can_access(resource, actions, max_hops)
     return _run(query, params)
 
 
 @mcp.tool()
 def get_principal_access(
-    principal: str, account: str | None = None
+    principal: str, account: str | None = None, max_hops: int = 5
 ) -> dict[str, Any]:
     """Report everything a user can access across BOTH routes - IAM Identity
     Center permission sets and direct role assignments (Account Access Manager
@@ -180,18 +215,24 @@ def get_principal_access(
     account the direct role sits in); `resource` / `resource_account` describe the
     reachable critical resource and its owning account.
 
+    Also covers a third route, role_chain: reaching the granting role by
+    assuming onward one or more CAN_ASSUME hops from a role the principal
+    already reaches directly or via a permission set.
+
     Args:
         principal: user name or substring.
         account: optional account-name substring to scope the report (matched
             against the account the access lands in or the resource's owner).
+        max_hops: max CAN_ASSUME chain length for the role_chain route
+            (default 5, capped at 10). Ignored by the other two routes.
     """
-    query, params = queries.principal_access_report(principal, account)
+    query, params = queries.principal_access_report(principal, account, max_hops)
     return _run(query, params)
 
 
 @mcp.tool()
 def get_principal_access_summary(
-    principal: str, account: str | None = None
+    principal: str, account: str | None = None, max_hops: int = 5
 ) -> dict[str, Any]:
     """Compact roll-up of what a user can reach, grouped by route and grant.
 
@@ -203,12 +244,18 @@ def get_principal_access_summary(
     route and the role's source (e.g. AccountAccessManager) on the direct_role
     route. Only grants that reach at least one critical resource are returned.
 
+    Also covers a third route, role_chain: reaching the granting role by
+    assuming onward one or more CAN_ASSUME hops from a role the principal
+    already reaches directly or via a permission set.
+
     Args:
         principal: user name or substring.
         account: optional account-name substring, matched against the resource's
             owning account.
+        max_hops: max CAN_ASSUME chain length for the role_chain route
+            (default 5, capped at 10). Ignored by the other two routes.
     """
-    query, params = queries.principal_access_summary(principal, account)
+    query, params = queries.principal_access_summary(principal, account, max_hops)
     return _run(query, params)
 
 
@@ -270,6 +317,34 @@ def graph_summary() -> dict[str, Any]:
     also confirms the server can reach the graph.
     """
     query, params = queries.node_label_counts()
+    return _run(query, params)
+
+
+@mcp.tool()
+def find_role_assumption_paths(
+    role: str, direction: str = "backward", max_hops: int = 5
+) -> dict[str, Any]:
+    """Trace IAM role-assumption chains over CAN_ASSUME trust edges.
+
+    Centers on role-to-role trust: which roles can assume which, transitively,
+    up to max_hops hops.
+
+    Args:
+        role: target/source role ARN or a substring of it (case-insensitive).
+        direction: 'backward' (default) lists the roles that can ultimately
+            assume the target role (who can reach it); 'forward' lists the roles
+            the source role can reach by assuming onward.
+        max_hops: max chain length to traverse (default 5, capped at 10).
+    """
+    normalized = direction.strip().lower() if isinstance(direction, str) else ""
+    if normalized not in ("backward", "forward"):
+        return {
+            "error": "bad_argument",
+            "message": (
+                f"Unknown direction '{direction}'. Choose 'backward' or 'forward'."
+            ),
+        }
+    query, params = queries.role_assumption_paths(role, normalized, max_hops)
     return _run(query, params)
 
 

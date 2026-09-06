@@ -2,12 +2,13 @@
 
 ## Overview
 
-The ARIA-gv solution now supports optional automatic scheduling for both core components:
+The ARIA-gv solution now supports optional automatic scheduling for three components:
 
 1. **Data Collection Scheduling**: Automatically runs the `AriaStateMachine` to collect fresh identity data from AWS IAM Identity Center
 2. **Graph Export Scheduling**: Automatically runs the `AriaExportGraphStateMachine` to refresh your Neptune Analytics graph with the latest data
+3. **Access Analyzer Scheduling**: Automatically runs the `AriaAccessAnalyzerStateMachine` to poll IAM Access Analyzer findings, on its own schedule independent of data collection
 
-This two-tier scheduling approach allows you to optimize data freshness while managing costs effectively.
+This scheduling approach allows you to optimize data freshness while managing costs effectively - Access Analyzer findings can be polled far more frequently (e.g. every 15 minutes) than the full identity data collection, since polling findings is much cheaper than re-collecting everything from IAM Identity Center.
 
 ## Scheduling Parameters
 
@@ -74,6 +75,72 @@ Configure automatic Neptune Analytics graph updates. The graph export now uses a
 - **Default**: `UTC`
 - **Description**: Timezone for cron-based schedules
 - **Examples**: `America/New_York`, `Europe/London`, `Asia/Tokyo`, `UTC`
+
+### Access Analyzer Scheduling (AriaAccessAnalyzerStateMachine)
+
+Configure automatic polling of IAM Access Analyzer findings. This state
+machine is entirely independent of `AriaStateMachine`'s identity data
+collection, so it can run on a much tighter schedule without paying the cost
+of re-collecting IAM Identity Center data every time.
+
+#### EnableAccessAnalyzerScheduling
+- **Type**: String
+- **Default**: `false`
+- **Values**: `true` | `false`
+- **Description**: Enable or disable automatic scheduling of Access Analyzer findings polling
+
+#### AccessAnalyzerScheduleExpression
+- **Type**: String
+- **Default**: `rate(15 minutes)`
+- **Description**: Schedule expression for Access Analyzer polling frequency
+- **Examples**:
+  - `rate(15 minutes)` - Poll findings every 15 minutes
+  - `rate(1 hour)` - Poll findings once per hour
+  - `cron(0/15 9-17 ? * MON-FRI *)` - Poll every 15 minutes during business hours
+
+#### AccessAnalyzerScheduleDescription
+- **Type**: String
+- **Default**: `Automated ARIA Access Analyzer findings polling every 15 minutes`
+- **Description**: Human-readable description for the scheduled Access Analyzer polling
+
+#### AccessAnalyzerScheduleTimezone
+- **Type**: String
+- **Default**: `UTC`
+- **Description**: Timezone for cron-based schedules
+
+### Queued unused IAM-role processing
+
+The unused-access branch has separate dispatcher and worker controls under
+`accessAnalyzerPoller` in `config.yaml`. It lists only active `UnusedIAMRole`
+findings whose resource type is `AWS::IAM::Role`, preserves the ARIA-gv
+Identity Center/AAM tracked-role restriction, and queues changed summaries.
+
+#### unusedRoleWorkerRequestsPerSecond
+- **Type**: Number
+- **Default**: `0.5`
+- **Description**: Strict global `GetFindingV2` limit for queued unused IAM-role details
+- **Important**: Lambda reserved concurrency is fixed at one, so this is a strict global rate limit. No separate SQS event-source concurrency cap is configured because it conflicts with that Lambda reservation. Do not add Lambda concurrency to raise throughput; increase this rate cautiously only after monitoring throttling and queue age.
+
+#### unusedRoleWorkerBatchSize
+- **Type**: Number
+- **Default**: `10`
+- **Values**: `1` through `10`
+- **Description**: SQS work messages handled in one worker invocation
+
+#### unusedRoleQueueVisibilityTimeoutSeconds
+- **Type**: Number
+- **Default**: `600`
+- **Description**: Visibility timeout for an in-progress finding work message
+
+#### unusedRoleQueueMaxReceiveCount
+- **Type**: Number
+- **Default**: `5`
+- **Description**: Receives before a failing finding message is sent to `UnusedRoleWorkDLQ`
+
+#### unusedRoleDispatcherLeaseSeconds
+- **Type**: Number
+- **Default**: `900`
+- **Description**: Lease that prevents overlapping scheduled dispatchers from queueing the same finding version
 
 ## Schedule Expression Formats
 
@@ -146,6 +213,17 @@ aws cloudformation deploy \
   --capabilities CAPABILITY_IAM
 ```
 
+### Enable Frequent Access Analyzer Polling
+```bash
+aws cloudformation deploy \
+  --template-file templates/main-stack.yaml \
+  --stack-name aria-gv-setup \
+  --parameter-overrides \
+    EnableAccessAnalyzerScheduling=true \
+    AccessAnalyzerScheduleExpression="rate(15 minutes)" \
+  --capabilities CAPABILITY_IAM
+```
+
 ### Disable All Scheduling
 ```bash
 aws cloudformation deploy \
@@ -154,6 +232,7 @@ aws cloudformation deploy \
   --parameter-overrides \
     EnableDataCollectionScheduling=false \
     EnableScheduling=false \
+    EnableAccessAnalyzerScheduling=false \
   --capabilities CAPABILITY_IAM
 ```
 
@@ -166,6 +245,16 @@ aws cloudformation deploy \
 3. **Graph Update**: Neptune Analytics graph is refreshed with the latest data
 4. **Independent Schedule**: AriaExportGraphStateMachine also runs on its own schedule as a backup
 
+### Independent Access Analyzer Polling
+
+`AriaAccessAnalyzerStateMachine` is not part of the chain above - it runs
+entirely on its own schedule (e.g., every 15 minutes) whenever
+`EnableAccessAnalyzerScheduling` is `true`. It does not trigger, and is not
+triggered by, `AriaStateMachine` or `AriaExportGraphStateMachine`. This lets
+you keep Access Analyzer findings fresh at a much tighter interval than the
+rest of the identity data collection, without paying the cost of re-running
+the full `AriaStateMachine` on every cycle.
+
 ### Benefits of This Approach
 
 ✅ **Always Fresh Data**: Graph export always uses the most recently collected data  
@@ -173,6 +262,7 @@ aws cloudformation deploy \
 ✅ **Fault Tolerance**: Independent schedule provides backup execution  
 ✅ **Cost Efficiency**: Graph export only runs when there's new data to process  
 ✅ **Flexible Timing**: Can still run graph export independently if needed  
+✅ **Fast Findings Refresh**: Access Analyzer polling runs on its own tighter schedule, independent of the full identity data collection cadence  
 
 ## Architecture Components
 
@@ -188,10 +278,21 @@ When scheduling is enabled, the following resources are created:
 - **AriaExportGraphSchedule**: Optional independent scheduler for graph export
 - **AriaExportGraphScheduleRole**: IAM role for the independent scheduler
 
+### Access Analyzer Scheduling
+- **AriaAccessAnalyzerSchedule**: EventBridge Scheduler for Access Analyzer polling
+- **AriaAccessAnalyzerScheduleRole**: IAM role for the Access Analyzer scheduler
+- **AccessAnalyzerUnusedDispatcherFunction**: Lists only active unused IAM-role summaries and queues changed tracked roles
+- **AccessAnalyzerUnusedWorkerFunction**: Single-concurrency strict-RPS SQS worker that retrieves full finding details
+- **UnusedRoleWorkQueue**: Durable SQS backlog for detail work
+- **UnusedRoleWorkDLQ**: Dead-letter queue for individual work messages that exhaust retries
+- **UnusedRoleWorkStateTable**: DynamoDB dispatcher lease and enqueue checkpoint state
+
 ### Monitoring & Error Handling
 - **AriaDataCollectionScheduleDLQ**: Dead Letter Queue for failed data collection executions
 - **AriaExportGraphTriggerDLQ**: Dead Letter Queue for failed event-triggered executions
 - **AriaExportGraphScheduleDLQ**: Dead Letter Queue for failed scheduled executions
+- **AriaAccessAnalyzerScheduleDLQ**: Dead Letter Queue for failed Access Analyzer schedule deliveries
+- **UnusedRoleWorkDLQ**: Dead Letter Queue for failed unused IAM-role detail messages
 - **Multiple Log Groups**: CloudWatch logs for comprehensive monitoring
 
 ## Monitoring Scheduled Executions
@@ -232,7 +333,7 @@ aws sqs get-queue-attributes \
 ### Common Issues
 
 #### Schedule Not Triggering
-1. Check if `EnableScheduling` is set to `true`
+1. Check if `EnableScheduling` (or `EnableDataCollectionScheduling`/`EnableAccessAnalyzerScheduling`, as relevant) is set to `true`
 2. Verify the schedule expression syntax
 3. Check IAM permissions for the scheduler role
 
@@ -263,6 +364,10 @@ aws stepfunctions start-execution \
 aws stepfunctions list-executions \
   --state-machine-arn arn:aws:states:region:account:stateMachine:AriaExportGraphStateMachine \
   --max-items 10
+
+# Manually trigger Access Analyzer polling
+aws stepfunctions start-execution \
+  --state-machine-arn arn:aws:states:region:account:stateMachine:AriaAccessAnalyzerStateMachine
 ```
 
 ## Best Practices

@@ -1,0 +1,329 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: "Step Functions state machine that polls IAM Access Analyzer findings, on its own schedule independent of AriaStateMachine"
+
+Parameters:
+  AccessAnalyzerPollerLambdaArn:
+    Type: String
+    Description: ARN of AccessAnalyzerPoller Lambda function
+  AccessAnalyzerUnusedDispatcherLambdaArn:
+    Type: String
+    Description: ARN of the SQS-dispatching unused IAM-role Access Analyzer Lambda
+  AriaSetupStackName:
+    Type: String
+    Description: Stable parent stack name used for Scheduler resource names
+
+  # Scheduling Parameters for AriaAccessAnalyzerStateMachine
+  EnableAccessAnalyzerScheduling:
+    Type: String
+    Description: Enable automatic scheduling of the AriaAccessAnalyzerStateMachine
+
+  AccessAnalyzerScheduleExpression:
+    Type: String
+    Description: "Schedule expression for automatic Access Analyzer polling (e.g., rate(15 minutes), cron(0/15 * * * ? *))"
+
+  AccessAnalyzerScheduleDescription:
+    Type: String
+    Description: "Description for the scheduled Access Analyzer polling execution"
+
+  AccessAnalyzerScheduleTimezone:
+    Type: String
+    Description: "Timezone for cron-based schedules (e.g., America/New_York, UTC)"
+
+Conditions:
+  ShouldEnableAccessAnalyzerScheduling:
+    !Equals [!Ref EnableAccessAnalyzerScheduling, "true"]
+
+Resources:
+  AriaAccessAnalyzerStateMachine:
+    Type: "AWS::StepFunctions::StateMachine"
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    DependsOn:
+      - AriaAccessAnalyzerStateMachineRolePolicy
+    Properties:
+      Definition:
+        Comment: State machine that polls IAM Access Analyzer findings (internal, external, unused access) independently of AriaStateMachine's identity data collection
+        StartAt: Run Access Analyzer Polling
+        States:
+          # Internal and external findings preserve their existing bounded
+          # poll/retry loops. The unused IAM-role dispatcher starts in a
+          # separate branch immediately, so an internal/external backlog
+          # cannot delay unused-role queueing.
+          Run Access Analyzer Polling:
+            Type: Parallel
+            Branches:
+              - StartAt: Poll Internal Access Analyzer Findings
+                States:
+                  Poll Internal Access Analyzer Findings:
+                    Type: Task
+                    Resource: arn:aws:states:::lambda:invoke
+                    Output: "{% $states.result.Payload %}"
+                    Assign:
+                      internalPollAttempt: "{% $states.result.Payload.body.next_poll_attempt %}"
+                    Arguments:
+                      FunctionName: !Ref AccessAnalyzerPollerLambdaArn
+                      Payload:
+                        family: "internal"
+                        poll_attempt: "{% $exists($internalPollAttempt) ? $internalPollAttempt : 1 %}"
+                    Retry:
+                      - ErrorEquals:
+                          - Lambda.ServiceException
+                          - Lambda.AWSLambdaException
+                          - Lambda.SdkClientException
+                          - Lambda.TooManyRequestsException
+                        IntervalSeconds: 1
+                        MaxAttempts: 3
+                        BackoffRate: 2
+                        JitterStrategy: FULL
+                    Next: Check Internal Access Analyzer More Work
+                  Check Internal Access Analyzer More Work:
+                    Type: Choice
+                    Choices:
+                      - Condition: "{% $states.input.body.more_work = true %}"
+                        Next: Poll Internal Access Analyzer Findings
+                    Default: Poll External Access Analyzer Findings
+                  Poll External Access Analyzer Findings:
+                    Type: Task
+                    Resource: arn:aws:states:::lambda:invoke
+                    Output: "{% $states.result.Payload %}"
+                    Assign:
+                      externalPollAttempt: "{% $states.result.Payload.body.next_poll_attempt %}"
+                    Arguments:
+                      FunctionName: !Ref AccessAnalyzerPollerLambdaArn
+                      Payload:
+                        family: "external"
+                        poll_attempt: "{% $exists($externalPollAttempt) ? $externalPollAttempt : 1 %}"
+                    Retry:
+                      - ErrorEquals:
+                          - Lambda.ServiceException
+                          - Lambda.AWSLambdaException
+                          - Lambda.SdkClientException
+                          - Lambda.TooManyRequestsException
+                        IntervalSeconds: 1
+                        MaxAttempts: 3
+                        BackoffRate: 2
+                        JitterStrategy: FULL
+                    Next: Check External Access Analyzer More Work
+                  Check External Access Analyzer More Work:
+                    Type: Choice
+                    Choices:
+                      - Condition: "{% $states.input.body.more_work = true %}"
+                        Next: Poll External Access Analyzer Findings
+                    Default: Internal and External Polling Complete
+                  Internal and External Polling Complete:
+                    Type: Pass
+                    End: true
+              - StartAt: Dispatch Unused IAM Role Findings
+                States:
+                  Dispatch Unused IAM Role Findings:
+                    Type: Task
+                    Resource: arn:aws:states:::lambda:invoke
+                    Output: "{% $states.result.Payload %}"
+                    Arguments:
+                      FunctionName: !Ref AccessAnalyzerUnusedDispatcherLambdaArn
+                      Payload: {}
+                    Retry:
+                      - ErrorEquals:
+                          - Lambda.ServiceException
+                          - Lambda.AWSLambdaException
+                          - Lambda.SdkClientException
+                          - Lambda.TooManyRequestsException
+                        IntervalSeconds: 1
+                        MaxAttempts: 3
+                        BackoffRate: 2
+                        JitterStrategy: FULL
+                    End: true
+            Next: Access Analyzer Polling Complete
+          Access Analyzer Polling Complete:
+            Type: Pass
+            End: true
+        QueryLanguage: JSONata
+      RoleArn: !GetAtt AriaAccessAnalyzerStateMachineRole.Arn
+      StateMachineName: AriaAccessAnalyzerStateMachine
+      StateMachineType: STANDARD
+      EncryptionConfiguration:
+        Type: AWS_OWNED_KEY
+      Tags:
+        - Key: aria
+          Value: state
+        - Key: auto-delete
+          Value: "no"
+
+  AriaAccessAnalyzerStateMachineRole:
+    Type: AWS::IAM::Role
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: states.amazonaws.com
+            Action: sts:AssumeRole
+      MaxSessionDuration: 3600
+      Tags:
+        - Key: aria
+          Value: role
+        - Key: auto-delete
+          Value: "no"
+
+  AriaAccessAnalyzerStateMachineRolePolicy:
+    Type: AWS::IAM::RolePolicy
+    Properties:
+      PolicyName: AccessAnalyzerStateMachineLambdaInvokeScopedAccessPolicy
+      RoleName: !Ref AriaAccessAnalyzerStateMachineRole
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - lambda:InvokeFunction
+            Resource:
+              - !Ref AccessAnalyzerPollerLambdaArn
+              - !Ref AccessAnalyzerUnusedDispatcherLambdaArn
+          - Effect: Allow
+            Action:
+              - logs:CreateLogDelivery
+              - logs:GetLogDelivery
+              - logs:UpdateLogDelivery
+              - logs:DeleteLogDelivery
+              - logs:ListLogDeliveries
+              - logs:PutResourcePolicy
+              - logs:DescribeResourcePolicies
+              - logs:DescribeLogGroups
+              - logs:CreateLogGroup
+              - logs:CreateLogStream
+              - logs:PutLogEvents
+              - logs:DescribeLogStreams
+            Resource: "*"
+
+  # EventBridge Scheduler for AriaAccessAnalyzerStateMachine
+  AriaAccessAnalyzerScheduleRole:
+    Type: AWS::IAM::Role
+    Condition: ShouldEnableAccessAnalyzerScheduling
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: scheduler.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: AriaAccessAnalyzerSchedulePolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - states:StartExecution
+                Resource: !GetAtt AriaAccessAnalyzerStateMachine.Arn
+      Tags:
+        - Key: aria
+          Value: scheduler-role
+        - Key: auto-delete
+          Value: "no"
+
+  AriaAccessAnalyzerSchedule:
+    Type: AWS::Scheduler::Schedule
+    Condition: ShouldEnableAccessAnalyzerScheduling
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      Name: !Sub "${AriaSetupStackName}-AccessAnalyzer"
+      Description: !Ref AccessAnalyzerScheduleDescription
+      State: ENABLED
+      FlexibleTimeWindow:
+        Mode: "OFF"
+      ScheduleExpression: !Ref AccessAnalyzerScheduleExpression
+      ScheduleExpressionTimezone: !Ref AccessAnalyzerScheduleTimezone
+      Target:
+        Arn: !GetAtt AriaAccessAnalyzerStateMachine.Arn
+        RoleArn: !GetAtt AriaAccessAnalyzerScheduleRole.Arn
+        RetryPolicy:
+          MaximumRetryAttempts: 2
+        DeadLetterConfig:
+          Arn: !GetAtt AriaAccessAnalyzerScheduleDLQ.Arn
+
+  # Dead Letter Queue for failed scheduled Access Analyzer polling executions
+  AriaAccessAnalyzerScheduleDLQ:
+    Type: AWS::SQS::Queue
+    Condition: ShouldEnableAccessAnalyzerScheduling
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W48
+            reason: "Default SQS encryption is sufficient for this dead letter queue"
+      checkov:
+        skip:
+          - id: CKV_AWS_27
+            comment: "Default SQS encryption is sufficient for this dead letter queue"
+    Properties:
+      QueueName: !Sub "${AWS::StackName}-AccessAnalyzer-DLQ"
+      MessageRetentionPeriod: 1209600 # 14 days
+      Tags:
+        - Key: aria
+          Value: dlq
+        - Key: auto-delete
+          Value: "no"
+
+  # CloudWatch Log Group for Access Analyzer scheduler monitoring
+  AriaAccessAnalyzerScheduleLogGroup:
+    Type: AWS::Logs::LogGroup
+    Condition: ShouldEnableAccessAnalyzerScheduling
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W84
+            reason: "Default CloudWatch Logs encryption is sufficient for this log group"
+      checkov:
+        skip:
+          - id: CKV_AWS_158
+            comment: "Default CloudWatch Logs encryption is sufficient for this scheduler log group"
+    Properties:
+      LogGroupName: !Sub "/aws/scheduler/${AWS::StackName}-AccessAnalyzer"
+      RetentionInDays: 30
+      Tags:
+        - Key: aria
+          Value: log
+        - Key: auto-delete
+          Value: "no"
+
+Outputs:
+  AccessAnalyzerStateMachineArn:
+    Description: ARN of the AriaAccessAnalyzerStateMachine
+    Value: !GetAtt AriaAccessAnalyzerStateMachine.Arn
+    Export:
+      Name: !Sub "${AWS::StackName}-AccessAnalyzerStateMachineArn"
+  AccessAnalyzerStateMachineName:
+    Description: Name of the AriaAccessAnalyzerStateMachine
+    Value: !Ref AriaAccessAnalyzerStateMachine
+    Export:
+      Name: !Sub "${AWS::StackName}-AccessAnalyzerStateMachineName"
+
+  AccessAnalyzerSchedulingEnabled:
+    Description: "Whether scheduling is enabled for the AriaAccessAnalyzerStateMachine"
+    Value: !Ref EnableAccessAnalyzerScheduling
+    Export:
+      Name: !Sub "${AWS::StackName}-AccessAnalyzerSchedulingEnabled"
+
+  AccessAnalyzerScheduleExpression:
+    Condition: ShouldEnableAccessAnalyzerScheduling
+    Description: "Schedule expression for the AriaAccessAnalyzerStateMachine"
+    Value: !Ref AccessAnalyzerScheduleExpression
+    Export:
+      Name: !Sub "${AWS::StackName}-AccessAnalyzerScheduleExpression"
+
+  AccessAnalyzerScheduleName:
+    Condition: ShouldEnableAccessAnalyzerScheduling
+    Description: "Name of the EventBridge Schedule for Access Analyzer polling"
+    Value: !Ref AriaAccessAnalyzerSchedule
+    Export:
+      Name: !Sub "${AWS::StackName}-AccessAnalyzerScheduleName"

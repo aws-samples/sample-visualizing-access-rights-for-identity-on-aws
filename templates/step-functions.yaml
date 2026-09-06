@@ -35,6 +35,9 @@ Parameters:
   ListAccountAccessAssignmentsLambdaArn:
     Type: String
     Description: ARN of ListAccountAccessAssignments Lambda function
+  GetTrustPoliciesLambdaArn:
+    Type: String
+    Description: ARN of GetTrustPolicies Lambda function
 
   # Scheduling Parameters for AriaStateMachine
   EnableDataCollectionScheduling:
@@ -281,6 +284,26 @@ Resources:
                 MaxAttempts: 3
                 BackoffRate: 2
                 JitterStrategy: FULL
+            Next: Collect IAM Role Trust Policies
+          Collect IAM Role Trust Policies:
+            Type: Task
+            Resource: arn:aws:states:::lambda:invoke
+            Output: "{% $states.result.Payload %}"
+            Arguments:
+              FunctionName: !Ref GetTrustPoliciesLambdaArn
+            Retry:
+              - ErrorEquals:
+                  - Lambda.ServiceException
+                  - Lambda.AWSLambdaException
+                  - Lambda.SdkClientException
+                  - Lambda.TooManyRequestsException
+                IntervalSeconds: 1
+                MaxAttempts: 3
+                BackoffRate: 2
+                JitterStrategy: FULL
+            Next: Data Collection Complete
+          Data Collection Complete:
+            Type: Pass
             End: true
         QueryLanguage: JSONata
       RoleArn: !GetAtt AriaStateMachineRole.Arn
@@ -337,6 +360,7 @@ Resources:
               - !Ref ListGroupAccountAssignmentsLambdaArn
               - !Ref GetIAMRolesLambdaArn
               - !Ref ListAccountAccessAssignmentsLambdaArn
+              - !Ref GetTrustPoliciesLambdaArn
           - Effect: Allow
             Action:
               - logs:CreateLogDelivery

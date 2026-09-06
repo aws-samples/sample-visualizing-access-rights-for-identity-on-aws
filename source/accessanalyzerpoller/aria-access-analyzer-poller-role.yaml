@@ -1,0 +1,151 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: "Create least-privilege IAM Access Analyzer roles in the delegated administrator account for ARIA-gv polling"
+
+Parameters:
+  TrustedAccountId:
+    Type: String
+    Description: AWS Account ID containing the ARIA-gv Lambda execution roles
+  AccessAnalyzerPollerLambdaExecutionRoleArn:
+    Type: String
+    Description: IAM role ARN of the legacy internal/external poller Lambda execution role in the hub account
+  AccessAnalyzerUnusedDispatcherLambdaExecutionRoleArn:
+    Type: String
+    Description: IAM role ARN of the unused IAM-role dispatcher Lambda execution role in the hub account
+  AccessAnalyzerUnusedWorkerLambdaExecutionRoleArn:
+    Type: String
+    Description: IAM role ARN of the unused IAM-role detail worker Lambda execution role in the hub account
+  InternalAccessAnalyzerArn:
+    Type: String
+    Description: ARN of the ORGANIZATION_INTERNAL_ACCESS analyzer in this account
+  ExternalAccessAnalyzerArn:
+    Type: String
+    Description: ARN of the ORGANIZATION analyzer in this account
+  UnusedAccessAnalyzerArn:
+    Type: String
+    Description: ARN of the ORGANIZATION_UNUSED_ACCESS analyzer in this account
+  RoleName:
+    Type: String
+    Default: AriaAccessAnalyzerPollerRole
+    Description: Name of the cross-account role used for internal and external finding polling
+  DispatcherRoleName:
+    Type: String
+    Default: AriaAccessAnalyzerDispatcherRole
+    Description: Name of the cross-account role used only to list unused IAM-role findings
+  WorkerRoleName:
+    Type: String
+    Default: AriaAccessAnalyzerWorkerRole
+    Description: Name of the cross-account role used only to retrieve unused IAM-role finding details
+
+Resources:
+  AriaAccessAnalyzerPollerRole:
+    Type: AWS::IAM::Role
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W28
+            reason: The parameterized role name must match AccessAnalyzerPollerRoleName in the main ARIA-gv deployment
+    Properties:
+      RoleName: !Ref RoleName
+      Description: "Role for the ARIA-gv internal and external Access Analyzer poller Lambda"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              AWS: !Sub "arn:aws:iam::${TrustedAccountId}:root"
+            Action: sts:AssumeRole
+            Condition:
+              StringEquals:
+                aws:PrincipalArn: !Ref AccessAnalyzerPollerLambdaExecutionRoleArn
+      Policies:
+        - PolicyName: AriaAccessAnalyzerPollerRolePolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - access-analyzer:ListFindings
+                  - access-analyzer:GetFinding
+                Resource:
+                  - !Ref InternalAccessAnalyzerArn
+                  - !Ref ExternalAccessAnalyzerArn
+      Tags:
+        - Key: aria
+          Value: role
+
+  AriaAccessAnalyzerDispatcherRole:
+    Type: AWS::IAM::Role
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W28
+            reason: The parameterized role name must match AccessAnalyzerDispatcherRoleName in the main ARIA-gv deployment
+    Properties:
+      RoleName: !Ref DispatcherRoleName
+      Description: "List-only role for the ARIA-gv unused IAM-role finding dispatcher Lambda"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              AWS: !Sub "arn:aws:iam::${TrustedAccountId}:root"
+            Action: sts:AssumeRole
+            Condition:
+              StringEquals:
+                aws:PrincipalArn: !Ref AccessAnalyzerUnusedDispatcherLambdaExecutionRoleArn
+      Policies:
+        - PolicyName: AriaAccessAnalyzerDispatcherRolePolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - access-analyzer:ListFindings
+                Resource: !Ref UnusedAccessAnalyzerArn
+      Tags:
+        - Key: aria
+          Value: role
+
+  AriaAccessAnalyzerWorkerRole:
+    Type: AWS::IAM::Role
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W28
+            reason: The parameterized role name must match AccessAnalyzerWorkerRoleName in the main ARIA-gv deployment
+    Properties:
+      RoleName: !Ref WorkerRoleName
+      Description: "Get-only role for the ARIA-gv unused IAM-role finding detail worker Lambda"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              AWS: !Sub "arn:aws:iam::${TrustedAccountId}:root"
+            Action: sts:AssumeRole
+            Condition:
+              StringEquals:
+                aws:PrincipalArn: !Ref AccessAnalyzerUnusedWorkerLambdaExecutionRoleArn
+      Policies:
+        - PolicyName: AriaAccessAnalyzerWorkerRolePolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - access-analyzer:GetFinding
+                Resource: !Ref UnusedAccessAnalyzerArn
+      Tags:
+        - Key: aria
+          Value: role
+
+Outputs:
+  PollerRoleArn:
+    Description: ARN of the internal and external poller role
+    Value: !GetAtt AriaAccessAnalyzerPollerRole.Arn
+  DispatcherRoleArn:
+    Description: ARN of the unused IAM-role dispatcher role
+    Value: !GetAtt AriaAccessAnalyzerDispatcherRole.Arn
+  WorkerRoleArn:
+    Description: ARN of the unused IAM-role detail worker role
+    Value: !GetAtt AriaAccessAnalyzerWorkerRole.Arn

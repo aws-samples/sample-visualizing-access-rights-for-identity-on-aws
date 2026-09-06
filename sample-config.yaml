@@ -1,0 +1,103 @@
+# Sample Deployment Configuration File for deploy-nested-stacks.sh
+#
+# This is a documentation-only sample. It shows every key that
+# deploy-nested-stacks.sh's parse_yaml_config() function reads, populated
+# with the same hardcoded default values already used by the script itself
+# (see the "# Configuration" block near the top of deploy-nested-stacks.sh),
+# except for the operator-specific Access Analyzer settings below.
+#
+# Usage:
+#   ./deploy-nested-stacks.sh --config-file config.yaml
+#
+# Every key in this file is optional - a key you omit simply leaves the
+# script's hardcoded default in place - EXCEPT
+# accessAnalyzerPoller.unusedAccessAnalyzerArn, which is required whenever
+# a config file is supplied (the script exits with an error if it's missing
+# and no --unused-access-analyzer-arn override is given).
+#
+# CLI flags always take precedence over values set in this file, e.g.:
+#   ./deploy-nested-stacks.sh --config-file config.yaml --region us-west-2
+# deploys with every setting from config.yaml except region, which becomes
+# us-west-2.
+
+# Configuration
+stackName: aria-gv-setup
+templatesBucket: "" # optional; auto-generated and stored in SSM if omitted
+region: us-east-1
+deployNeptune: true
+deployNeptuneNotebook: true # requires deployNeptune: true - the notebook connects to the Neptune graph
+publicIp: 0.0.0.0/0
+
+# MCP Server (AgentCore) Configuration
+mcpServer:
+  deploy: true
+  containerImageUri: "" # required if mcpServer.deploy is true (ECR image URI)
+  agentRuntimeName: aria_gv_mcp
+
+# Data Collection Scheduling Configuration
+dataCollectionScheduling:
+  enabled: true
+  scheduleExpression: "rate(6 hours)"
+  scheduleDescription: "Automated ARIA identity data collection every 6 hours"
+  scheduleTimezone: UTC
+
+# Graph Export Scheduling Configuration
+graphExportScheduling:
+  enabled: true
+  scheduleExpression: "rate(1 day)"
+  scheduleDescription: "Daily execution of ARIA graph export and import"
+  scheduleTimezone: UTC
+
+# Access Analyzer Scheduling Configuration
+#
+# AriaAccessAnalyzerStateMachine polls Access Analyzer findings on its own
+# schedule, independent of dataCollectionScheduling above, so findings can
+# be refreshed much more frequently than the rest of the identity data
+# without paying the cost of re-running the full identity collection.
+accessAnalyzerScheduling:
+  enabled: true
+  scheduleExpression: "rate(15 minutes)"
+  scheduleDescription: "Automated ARIA Access Analyzer findings polling every 15 minutes"
+  scheduleTimezone: UTC
+
+# Access Analyzer Poller Configuration
+#
+# The three analyzer ARNs below must reference pre-created, organization-
+# scoped IAM Access Analyzer analyzers (types ORGANIZATION_INTERNAL_ACCESS,
+# ORGANIZATION, and ORGANIZATION_UNUSED_ACCESS respectively) in the
+# delegated administrator account. This solution does not create these
+# analyzers - they must already exist before you deploy.
+#
+# The values below are placeholder examples (account ID 111111111111) and
+# must be replaced with your own analyzer ARNs and account ID.
+accessAnalyzerPoller:
+  internalAccessAnalyzerArn: "arn:aws:access-analyzer:us-east-1:111111111111:analyzer/AriaOrgInternalAccessAnalyzer"
+  externalAccessAnalyzerArn: "arn:aws:access-analyzer:us-east-1:111111111111:analyzer/AriaOrgExternalAccessAnalyzer"
+  # Required whenever this config file is used. Must be the ARN of the
+  # operator-designated ORGANIZATION_UNUSED_ACCESS analyzer, never an
+  # auto-created analyzer AWS or another service may have provisioned.
+  unusedAccessAnalyzerArn: "arn:aws:access-analyzer:us-east-1:111111111111:analyzer/AriaOrgUnusedAccessAnalyzer"
+  delegatedAdminAccountId: "111111111111"
+  accessAnalyzerPollerRoleName: AriaAccessAnalyzerPollerRole
+  # Dedicated cross-account roles enforce least privilege: the dispatcher can
+  # list unused-role summaries only, and the worker can retrieve details only.
+  accessAnalyzerDispatcherRoleName: AriaAccessAnalyzerDispatcherRole
+  accessAnalyzerWorkerRoleName: AriaAccessAnalyzerWorkerRole
+  # Max Step Functions re-invocations for the retained internal/external
+  # families while they still have unfetched changed/new findings.
+  maxPollAttempts: 6
+  # Fixed rate limit for the retained internal/external poller.
+  requestsPerSecond: 0.5
+  # Lambda reserved concurrency is one, making this a strict global
+  # GetFindingV2 rate limit. No SQS event-source concurrency cap is set,
+  # because it would conflict with the Lambda reservation. Increase only
+  # after monitoring throttling and queue age.
+  unusedRoleWorkerRequestsPerSecond: 0.5
+  # SQS worker batching and recovery controls. Keep batch size <= 10. The
+  # visibility timeout must exceed the 120-second worker timeout.
+  unusedRoleWorkerBatchSize: 10
+  unusedRoleQueueVisibilityTimeoutSeconds: 600
+  unusedRoleQueueMaxReceiveCount: 5
+  # Prevents overlapping schedule executions from dispatching the same role
+  # backlog concurrently.
+  unusedRoleDispatcherLeaseSeconds: 900
