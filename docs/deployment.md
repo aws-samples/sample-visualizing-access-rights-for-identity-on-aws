@@ -44,6 +44,36 @@ The easiest way to deploy, with optional scheduling presets:
 
 See [Scheduling](scheduling.md) for all presets and options.
 
+### Role filtering
+
+Configure the shared `roleFiltering` block in `config.yaml` or a file passed to
+`--config-file`. The same selectors scope internal and unused IAM Access
+Analyzer findings and the IAM role inventory that produces trust-chain edges:
+
+```yaml
+roleFiltering:
+  # Include or exclude every IAM Identity Center permission-set role.
+  includePermissionSets: true
+  # Include or exclude every Account Access Manager role.
+  includeAamRoles: true
+  # Shell-style role-name patterns add other IAM roles to both paths.
+  includeRoleNamePatterns: ["App-*-Read", "AuditRole"]
+  # Denylist that wins over every include selector above.
+  excludeRoleNamePatterns: ["App-*-Read-Temp"]
+```
+
+`includePermissionSets` and `includeAamRoles` are binary category selectors.
+Set either to `true` to include every role in that category, or `false` to
+exclude every one. A false setting is a hard exclusion: another category or a
+role-name pattern cannot re-include that role. Role-name patterns use
+case-sensitive shell matching for roles outside those categories.
+`excludeRoleNamePatterns` is a denylist that takes precedence over every
+include selector: a role whose name matches an exclude pattern is dropped even
+if it is a permission-set or AAM role, or matches an include pattern. An empty
+exclude list excludes nothing. External Access Analyzer findings remain
+unfiltered because they describe resource exposure rather than the selected
+role principals.
+
 ### Alternative: CloudFormation directly
 
 ```bash

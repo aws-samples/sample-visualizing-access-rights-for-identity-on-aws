@@ -53,10 +53,26 @@ UNUSED_ROLE_QUEUE_VISIBILITY_TIMEOUT_SECONDS="600"
 UNUSED_ROLE_QUEUE_MAX_RECEIVE_COUNT="5"
 UNUSED_ROLE_DISPATCHER_LEASE_SECONDS="900"
 
+# Shared role filtering for Access Analyzer and trust-chain processing.
+ROLE_FILTER_INCLUDE_PERMISSION_SETS="true"
+ROLE_FILTER_INCLUDE_AAM_ROLES="true"
+ROLE_FILTER_INCLUDE_ROLE_NAME_PATTERNS="[]"
+# Exclude patterns are a denylist that wins over every include selector: a role
+# whose name matches one is dropped even if it is a permission-set or AAM role
+# or matches an include pattern.
+ROLE_FILTER_EXCLUDE_ROLE_NAME_PATTERNS="[]"
+
+# Debug output configuration. When DEBUG is "true", AWS CLI stdout/stderr that
+# is normally sent to /dev/null is surfaced instead, so failures are no longer
+# silent. When DEBUG_LOG_FILE is set that output is also appended to the file.
+DEBUG="false"
+DEBUG_LOG_FILE=""
+
 # Colors for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
 echo_info() {
@@ -71,11 +87,40 @@ echo_error() {
     echo -e "${RED}[ERROR]${NC} $1"
 }
 
+# Emit a debug line to stderr (and the debug log file, if configured) but only
+# when --debug is enabled. Normal runs stay quiet.
+echo_debug() {
+    if [[ "$DEBUG" == "true" ]]; then
+        echo -e "${BLUE}[DEBUG]${NC} $1" >&2
+        if [[ -n "$DEBUG_LOG_FILE" ]]; then
+            echo "[DEBUG] $1" >> "$DEBUG_LOG_FILE"
+        fi
+    fi
+}
+
+# Run a command, suppressing its output on normal runs (preserving the previous
+# `> /dev/null 2>&1` behavior) but surfacing full stdout/stderr when --debug is
+# enabled. With --debug-log-file set, that output is also appended to the log
+# file. The command's own exit status is always preserved, so `set -e` and `if`
+# predicates behave exactly as they did before.
+run_cmd() {
+    if [[ "$DEBUG" == "true" ]]; then
+        echo_debug "Running: $*"
+        if [[ -n "$DEBUG_LOG_FILE" ]]; then
+            "$@" 2>&1 | tee -a "$DEBUG_LOG_FILE"
+            return "${PIPESTATUS[0]}"
+        fi
+        "$@"
+        return $?
+    fi
+    "$@" > /dev/null 2>&1
+}
+
 # Function to parse the YAML config file into shell variable assignments.
 # Emits `YAML_KEY=value` lines (one per recognized setting) that the caller
 # evaluates with `eval "$(parse_yaml_config "$CONFIG_FILE")"`. Missing keys
 # emit nothing, so a partial YAML file leaves those variables at whatever
-# value they already held (their hardcoded default, per Requirement 10.4).
+# value they already held (their hardcoded default).
 # On a missing PyYAML dependency or a YAML syntax error, a single
 # `YAML_PARSE_ERROR=<description>` line is emitted instead.
 parse_yaml_config() {
@@ -83,6 +128,7 @@ parse_yaml_config() {
     python3 - "$config_file" <<'PYEOF'
 import sys
 import shlex
+import json
 
 try:
     import yaml
@@ -112,11 +158,29 @@ def emit(var_name, value):
         value = "true" if value else "false"
     print(f"{var_name}={shlex.quote(str(value))}")
 
+def emit_json_array(var_name, value):
+    if value is None:
+        return
+    if not isinstance(value, list) or any(
+        not isinstance(entry, str) or not entry for entry in value
+    ):
+        print(
+            "YAML_PARSE_ERROR="
+            + shlex.quote(f"{var_name} must be a YAML list of non-empty strings")
+        )
+        sys.exit(1)
+    print(f"{var_name}={shlex.quote(json.dumps(value))}")
+
+
 mcp = config.get("mcpServer", {}) or {}
 dcs = config.get("dataCollectionScheduling", {}) or {}
 ges = config.get("graphExportScheduling", {}) or {}
 aas = config.get("accessAnalyzerScheduling", {}) or {}
 aap = config.get("accessAnalyzerPoller", {}) or {}
+role_filters = config.get("roleFiltering", {}) or {}
+if not isinstance(role_filters, dict):
+    print("YAML_PARSE_ERROR=roleFiltering must be a mapping")
+    sys.exit(1)
 
 emit("YAML_STACK_NAME", config.get("stackName"))
 emit("YAML_TEMPLATES_BUCKET", config.get("templatesBucket"))
@@ -153,13 +217,19 @@ emit("YAML_UNUSED_ROLE_WORKER_BATCH_SIZE", aap.get("unusedRoleWorkerBatchSize"))
 emit("YAML_UNUSED_ROLE_QUEUE_VISIBILITY_TIMEOUT_SECONDS", aap.get("unusedRoleQueueVisibilityTimeoutSeconds"))
 emit("YAML_UNUSED_ROLE_QUEUE_MAX_RECEIVE_COUNT", aap.get("unusedRoleQueueMaxReceiveCount"))
 emit("YAML_UNUSED_ROLE_DISPATCHER_LEASE_SECONDS", aap.get("unusedRoleDispatcherLeaseSeconds"))
+emit("YAML_ROLE_FILTER_INCLUDE_PERMISSION_SETS", role_filters.get("includePermissionSets"))
+emit("YAML_ROLE_FILTER_INCLUDE_AAM_ROLES", role_filters.get("includeAamRoles"))
+emit_json_array("YAML_ROLE_FILTER_INCLUDE_ROLE_NAME_PATTERNS", role_filters.get("includeRoleNamePatterns"))
+emit_json_array("YAML_ROLE_FILTER_EXCLUDE_ROLE_NAME_PATTERNS", role_filters.get("excludeRoleNamePatterns"))
+emit("YAML_DEBUG", config.get("debug"))
+emit("YAML_DEBUG_LOG_FILE", config.get("debugLogFile"))
 PYEOF
 }
 
 # Function to check if S3 bucket exists
 check_bucket() {
     local bucket_name=$1
-    if aws s3api head-bucket --bucket "$bucket_name" > /dev/null 2>&1; then
+    if run_cmd aws s3api head-bucket --bucket "$bucket_name"; then
         echo_info "S3 bucket $bucket_name exists"
         return 0
     else
@@ -174,21 +244,21 @@ create_bucket() {
     echo_info "Creating S3 bucket: $bucket_name"
     
     if [ "$REGION" = "us-east-1" ]; then
-        aws s3api create-bucket --bucket "$bucket_name" > /dev/null 2>&1
+        run_cmd aws s3api create-bucket --bucket "$bucket_name"
     else
-        aws s3api create-bucket --bucket "$bucket_name" --region "$REGION" \
-            --create-bucket-configuration LocationConstraint="$REGION" > /dev/null 2>&1
+        run_cmd aws s3api create-bucket --bucket "$bucket_name" --region "$REGION" \
+            --create-bucket-configuration LocationConstraint="$REGION"
     fi
     
     # Enable versioning
-    aws s3api put-bucket-versioning --bucket "$bucket_name" \
-        --versioning-configuration Status=Enabled > /dev/null 2>&1
+    run_cmd aws s3api put-bucket-versioning --bucket "$bucket_name" \
+        --versioning-configuration Status=Enabled
     
     echo_info "S3 bucket $bucket_name created successfully"
     
     # Store the bucket name in SSM parameter store for future reference
     if [ "$bucket_name" = "$TEMPLATES_BUCKET" ]; then
-        aws ssm put-parameter --name "aria-templates-bucket" --value "$bucket_name" --type "String" --overwrite --region "$REGION" > /dev/null 2>&1
+        run_cmd aws ssm put-parameter --name "aria-templates-bucket" --value "$bucket_name" --type "String" --overwrite --region "$REGION"
         echo_info "Templates bucket name stored in SSM parameter store"
     fi
 }
@@ -198,7 +268,7 @@ upload_templates() {
     echo_info "Uploading CloudFormation templates to S3..."
     
     # Upload all template files
-    aws s3 cp templates/ s3://"$TEMPLATES_BUCKET"/ --recursive > /dev/null 2>&1
+    run_cmd aws s3 cp templates/ s3://"$TEMPLATES_BUCKET"/ --recursive
     
     echo_info "Templates uploaded successfully"
 }
@@ -208,7 +278,7 @@ validate_template() {
     local template_file=$1
     echo_info "Validating template: $template_file"
     
-    aws cloudformation validate-template --template-body file://"$template_file"  > /dev/null 2>&1
+    run_cmd aws cloudformation validate-template --template-body file://"$template_file"
     
     echo_info "Template $template_file is valid"
 }
@@ -216,10 +286,10 @@ validate_template() {
 # Function to validate scheduling parameters
 validate_scheduling_parameters() {
     # Require the unused access analyzer ARN when a config file was supplied.
-    # Requirement 10.8: a Deployment_Configuration_File must explicitly
+    # A deployment configuration file must explicitly
     # specify accessAnalyzerPoller.unusedAccessAnalyzerArn (or the operator
     # must override it with --unused-access-analyzer-arn); flags-only
-    # invocations (no --config-file) are unaffected, per Requirement 10.5.
+    # invocations (no --config-file) are unaffected.
     if [[ -n "$CONFIG_FILE" && -z "$UNUSED_ACCESS_ANALYZER_ARN" ]]; then
         echo_error "The unused access analyzer ARN must be specified via the 'accessAnalyzerPoller.unusedAccessAnalyzerArn' YAML key in the config file or the '--unused-access-analyzer-arn' flag."
         exit 1
@@ -327,7 +397,7 @@ deploy_stack() {
     echo_info "Deploying CloudFormation stack: $STACK_NAME"
 
     # Check if stack exists
-    if aws cloudformation describe-stacks --stack-name "$STACK_NAME" > /dev/null 2>&1; then
+    if run_cmd aws cloudformation describe-stacks --stack-name "$STACK_NAME"; then
         echo_info "Stack exists, updating..."
         OPERATION="update-stack"
     else
@@ -335,54 +405,89 @@ deploy_stack() {
         OPERATION="create-stack"
     fi
     
+    # Build the --parameters argument as JSON rather than the AWS CLI
+    # shorthand (ParameterKey=...,ParameterValue=...). The shorthand parser
+    # treats any value that begins with "[" as a list, which corrupts
+    # JSON-array string parameters such as RoleFilterIncludeRoleNamePatterns
+    # (e.g. ["waddeam-*"] would be parsed as a list and rejected because the
+    # parameter is a String). Emitting proper JSON keeps every value a string
+    # and is robust to brackets, quotes, and spaces. Values are streamed to
+    # python NUL-delimited so no value needs shell or JSON escaping.
+    local -a stack_parameters=(
+        TemplatesBucketName "$TEMPLATES_BUCKET"
+        DeployNeptune "$DEPLOY_NEPTUNE"
+        DeployNeptuneNotebook "$DEPLOY_NEPTUNE_NOTEBOOK"
+        PublicIPAddress "$PUBLIC_IP"
+        EnableDataCollectionScheduling "$ENABLE_DATA_COLLECTION_SCHEDULING"
+        DataCollectionScheduleExpression "$DATA_COLLECTION_SCHEDULE_EXPRESSION"
+        DataCollectionScheduleDescription "$DATA_COLLECTION_SCHEDULE_DESCRIPTION"
+        DataCollectionScheduleTimezone "$DATA_COLLECTION_SCHEDULE_TIMEZONE"
+        EnableScheduling "$ENABLE_GRAPH_EXPORT_SCHEDULING"
+        ScheduleExpression "$GRAPH_EXPORT_SCHEDULE_EXPRESSION"
+        ScheduleDescription "$GRAPH_EXPORT_SCHEDULE_DESCRIPTION"
+        ScheduleTimezone "$GRAPH_EXPORT_SCHEDULE_TIMEZONE"
+        EnableAccessAnalyzerScheduling "$ENABLE_ACCESS_ANALYZER_SCHEDULING"
+        AccessAnalyzerScheduleExpression "$ACCESS_ANALYZER_SCHEDULE_EXPRESSION"
+        AccessAnalyzerScheduleDescription "$ACCESS_ANALYZER_SCHEDULE_DESCRIPTION"
+        AccessAnalyzerScheduleTimezone "$ACCESS_ANALYZER_SCHEDULE_TIMEZONE"
+        ManagementAccountId "$MANAGEMENT_ACCOUNT_ID"
+        DeployMcpServer "$DEPLOY_MCP_SERVER"
+        McpContainerImageUri "$MCP_CONTAINER_IMAGE_URI"
+        McpAgentRuntimeName "$MCP_AGENT_RUNTIME_NAME"
+        InternalAccessAnalyzerArn "$INTERNAL_ACCESS_ANALYZER_ARN"
+        ExternalAccessAnalyzerArn "$EXTERNAL_ACCESS_ANALYZER_ARN"
+        UnusedAccessAnalyzerArn "$UNUSED_ACCESS_ANALYZER_ARN"
+        DelegatedAdminAccountId "$DELEGATED_ADMIN_ACCOUNT_ID"
+        AccessAnalyzerPollerRoleName "$ACCESS_ANALYZER_POLLER_ROLE_NAME"
+        AccessAnalyzerPollerMaxPollAttempts "$ACCESS_ANALYZER_POLLER_MAX_POLL_ATTEMPTS"
+        AccessAnalyzerPollerRequestsPerSecond "$ACCESS_ANALYZER_POLLER_REQUESTS_PER_SECOND"
+        AccessAnalyzerDispatcherRoleName "$ACCESS_ANALYZER_DISPATCHER_ROLE_NAME"
+        AccessAnalyzerWorkerRoleName "$ACCESS_ANALYZER_WORKER_ROLE_NAME"
+        UnusedRoleWorkerRequestsPerSecond "$UNUSED_ROLE_WORKER_REQUESTS_PER_SECOND"
+        UnusedRoleWorkerBatchSize "$UNUSED_ROLE_WORKER_BATCH_SIZE"
+        UnusedRoleQueueVisibilityTimeoutSeconds "$UNUSED_ROLE_QUEUE_VISIBILITY_TIMEOUT_SECONDS"
+        UnusedRoleQueueMaxReceiveCount "$UNUSED_ROLE_QUEUE_MAX_RECEIVE_COUNT"
+        UnusedRoleDispatcherLeaseSeconds "$UNUSED_ROLE_DISPATCHER_LEASE_SECONDS"
+        RoleFilterIncludePermissionSets "$ROLE_FILTER_INCLUDE_PERMISSION_SETS"
+        RoleFilterIncludeAamRoles "$ROLE_FILTER_INCLUDE_AAM_ROLES"
+        RoleFilterIncludeRoleNamePatterns "$ROLE_FILTER_INCLUDE_ROLE_NAME_PATTERNS"
+        RoleFilterExcludeRoleNamePatterns "$ROLE_FILTER_EXCLUDE_ROLE_NAME_PATTERNS"
+    )
+
+    local parameters_json
+    parameters_json=$(printf '%s\0' "${stack_parameters[@]}" | python3 -c '
+import json
+import sys
+
+tokens = sys.stdin.buffer.read().split(b"\0")
+# printf appends a trailing NUL after the final value, leaving one empty
+# token at the end; drop exactly that one.
+if tokens and tokens[-1] == b"":
+    tokens = tokens[:-1]
+if len(tokens) % 2 != 0:
+    sys.stderr.write("stack parameter list must be key/value pairs\n")
+    sys.exit(1)
+params = [
+    {"ParameterKey": tokens[i].decode(), "ParameterValue": tokens[i + 1].decode()}
+    for i in range(0, len(tokens), 2)
+]
+print(json.dumps(params))
+')
+
     # Deploy the stack
-    aws cloudformation "$OPERATION" \
+    run_cmd aws cloudformation "$OPERATION" \
         --stack-name "$STACK_NAME" \
         --template-body file://templates/main-stack.yaml \
-        --parameters \
-            ParameterKey=TemplatesBucketName,ParameterValue="$TEMPLATES_BUCKET" \
-            ParameterKey=DeployNeptune,ParameterValue="$DEPLOY_NEPTUNE" \
-            ParameterKey=DeployNeptuneNotebook,ParameterValue="$DEPLOY_NEPTUNE_NOTEBOOK" \
-            ParameterKey=PublicIPAddress,ParameterValue="$PUBLIC_IP" \
-            ParameterKey=EnableDataCollectionScheduling,ParameterValue="$ENABLE_DATA_COLLECTION_SCHEDULING" \
-            ParameterKey=DataCollectionScheduleExpression,ParameterValue="$DATA_COLLECTION_SCHEDULE_EXPRESSION" \
-            ParameterKey=DataCollectionScheduleDescription,ParameterValue="$DATA_COLLECTION_SCHEDULE_DESCRIPTION" \
-            ParameterKey=DataCollectionScheduleTimezone,ParameterValue="$DATA_COLLECTION_SCHEDULE_TIMEZONE" \
-            ParameterKey=EnableScheduling,ParameterValue="$ENABLE_GRAPH_EXPORT_SCHEDULING" \
-            ParameterKey=ScheduleExpression,ParameterValue="$GRAPH_EXPORT_SCHEDULE_EXPRESSION" \
-            ParameterKey=ScheduleDescription,ParameterValue="$GRAPH_EXPORT_SCHEDULE_DESCRIPTION" \
-            ParameterKey=ScheduleTimezone,ParameterValue="$GRAPH_EXPORT_SCHEDULE_TIMEZONE" \
-            ParameterKey=EnableAccessAnalyzerScheduling,ParameterValue="$ENABLE_ACCESS_ANALYZER_SCHEDULING" \
-            ParameterKey=AccessAnalyzerScheduleExpression,ParameterValue="$ACCESS_ANALYZER_SCHEDULE_EXPRESSION" \
-            ParameterKey=AccessAnalyzerScheduleDescription,ParameterValue="$ACCESS_ANALYZER_SCHEDULE_DESCRIPTION" \
-            ParameterKey=AccessAnalyzerScheduleTimezone,ParameterValue="$ACCESS_ANALYZER_SCHEDULE_TIMEZONE" \
-            ParameterKey=ManagementAccountId,ParameterValue="$MANAGEMENT_ACCOUNT_ID" \
-            ParameterKey=DeployMcpServer,ParameterValue="$DEPLOY_MCP_SERVER" \
-            ParameterKey=McpContainerImageUri,ParameterValue="$MCP_CONTAINER_IMAGE_URI" \
-            ParameterKey=McpAgentRuntimeName,ParameterValue="$MCP_AGENT_RUNTIME_NAME" \
-            ParameterKey=InternalAccessAnalyzerArn,ParameterValue="$INTERNAL_ACCESS_ANALYZER_ARN" \
-            ParameterKey=ExternalAccessAnalyzerArn,ParameterValue="$EXTERNAL_ACCESS_ANALYZER_ARN" \
-            ParameterKey=UnusedAccessAnalyzerArn,ParameterValue="$UNUSED_ACCESS_ANALYZER_ARN" \
-            ParameterKey=DelegatedAdminAccountId,ParameterValue="$DELEGATED_ADMIN_ACCOUNT_ID" \
-            ParameterKey=AccessAnalyzerPollerRoleName,ParameterValue="$ACCESS_ANALYZER_POLLER_ROLE_NAME" \
-            ParameterKey=AccessAnalyzerPollerMaxPollAttempts,ParameterValue="$ACCESS_ANALYZER_POLLER_MAX_POLL_ATTEMPTS" \
-            ParameterKey=AccessAnalyzerPollerRequestsPerSecond,ParameterValue="$ACCESS_ANALYZER_POLLER_REQUESTS_PER_SECOND" \
-            ParameterKey=AccessAnalyzerDispatcherRoleName,ParameterValue="$ACCESS_ANALYZER_DISPATCHER_ROLE_NAME" \
-            ParameterKey=AccessAnalyzerWorkerRoleName,ParameterValue="$ACCESS_ANALYZER_WORKER_ROLE_NAME" \
-            ParameterKey=UnusedRoleWorkerRequestsPerSecond,ParameterValue="$UNUSED_ROLE_WORKER_REQUESTS_PER_SECOND" \
-            ParameterKey=UnusedRoleWorkerBatchSize,ParameterValue="$UNUSED_ROLE_WORKER_BATCH_SIZE" \
-            ParameterKey=UnusedRoleQueueVisibilityTimeoutSeconds,ParameterValue="$UNUSED_ROLE_QUEUE_VISIBILITY_TIMEOUT_SECONDS" \
-            ParameterKey=UnusedRoleQueueMaxReceiveCount,ParameterValue="$UNUSED_ROLE_QUEUE_MAX_RECEIVE_COUNT" \
-            ParameterKey=UnusedRoleDispatcherLeaseSeconds,ParameterValue="$UNUSED_ROLE_DISPATCHER_LEASE_SECONDS" \
-        --capabilities CAPABILITY_IAM > /dev/null 2>&1
+        --parameters "$parameters_json" \
+        --capabilities CAPABILITY_IAM
     
     echo_info "Stack deployment initiated. Waiting for completion..."
     
     # Wait for stack operation to complete
     if [ "$OPERATION" = "create-stack" ]; then
-        aws cloudformation wait stack-create-complete --stack-name "$STACK_NAME" > /dev/null 2>&1
+        run_cmd aws cloudformation wait stack-create-complete --stack-name "$STACK_NAME"
     else
-        aws cloudformation wait stack-update-complete --stack-name "$STACK_NAME" > /dev/null 2>&1
+        run_cmd aws cloudformation wait stack-update-complete --stack-name "$STACK_NAME"
     fi
     
     echo_info "Stack deployment completed successfully"
@@ -508,6 +613,14 @@ fi
 # Main execution
 main() {
     echo_info "Starting deployment of nested CloudFormation stacks"
+    if [[ "$DEBUG" == "true" ]]; then
+        if [[ -n "$DEBUG_LOG_FILE" ]]; then
+            echo_info "Debug output enabled (also appending to $DEBUG_LOG_FILE)"
+            echo "=== ARIA-gv deployment debug log - $(date) ===" >> "$DEBUG_LOG_FILE"
+        else
+            echo_info "Debug output enabled"
+        fi
+    fi
     echo_info "Stack Name: $STACK_NAME"
     echo_info "Templates Bucket: $TEMPLATES_BUCKET"
     echo_info "Region: $REGION"
@@ -563,7 +676,7 @@ main() {
 }
 
 # Pre-scan for --config-file/-c so YAML values load before the flag-parsing
-# loop below applies CLI overrides on top of them (Requirement 10.3). This
+# loop below applies CLI overrides on top of them. This
 # scan does not consume "$@" - the flag-parsing loop still needs to see
 # every original argument, including this flag itself (handled there as a
 # no-op, since it has already been applied here).
@@ -606,8 +719,8 @@ if [[ -n "$CONFIG_FILE" ]]; then
     # Apply loaded YAML values on top of the hardcoded/auto-generated
     # defaults already established above. Each is only applied if the YAML
     # actually set it, so an omitted key leaves the existing default in
-    # place (Requirement 10.4) - the flag-parsing loop further below can
-    # still override any of these (Requirement 10.3).
+    # place - the flag-parsing loop further below can
+    # still override any of these.
     [[ -n "${YAML_STACK_NAME:-}" ]] && STACK_NAME="$YAML_STACK_NAME"
     [[ -n "${YAML_TEMPLATES_BUCKET:-}" ]] && TEMPLATES_BUCKET="$YAML_TEMPLATES_BUCKET"
     [[ -n "${YAML_REGION:-}" ]] && REGION="$YAML_REGION"
@@ -643,6 +756,12 @@ if [[ -n "$CONFIG_FILE" ]]; then
     [[ -n "${YAML_UNUSED_ROLE_QUEUE_VISIBILITY_TIMEOUT_SECONDS:-}" ]] && UNUSED_ROLE_QUEUE_VISIBILITY_TIMEOUT_SECONDS="$YAML_UNUSED_ROLE_QUEUE_VISIBILITY_TIMEOUT_SECONDS"
     [[ -n "${YAML_UNUSED_ROLE_QUEUE_MAX_RECEIVE_COUNT:-}" ]] && UNUSED_ROLE_QUEUE_MAX_RECEIVE_COUNT="$YAML_UNUSED_ROLE_QUEUE_MAX_RECEIVE_COUNT"
     [[ -n "${YAML_UNUSED_ROLE_DISPATCHER_LEASE_SECONDS:-}" ]] && UNUSED_ROLE_DISPATCHER_LEASE_SECONDS="$YAML_UNUSED_ROLE_DISPATCHER_LEASE_SECONDS"
+    [[ -n "${YAML_ROLE_FILTER_INCLUDE_PERMISSION_SETS:-}" ]] && ROLE_FILTER_INCLUDE_PERMISSION_SETS="$YAML_ROLE_FILTER_INCLUDE_PERMISSION_SETS"
+    [[ -n "${YAML_ROLE_FILTER_INCLUDE_AAM_ROLES:-}" ]] && ROLE_FILTER_INCLUDE_AAM_ROLES="$YAML_ROLE_FILTER_INCLUDE_AAM_ROLES"
+    [[ -n "${YAML_ROLE_FILTER_INCLUDE_ROLE_NAME_PATTERNS:-}" ]] && ROLE_FILTER_INCLUDE_ROLE_NAME_PATTERNS="$YAML_ROLE_FILTER_INCLUDE_ROLE_NAME_PATTERNS"
+    [[ -n "${YAML_ROLE_FILTER_EXCLUDE_ROLE_NAME_PATTERNS:-}" ]] && ROLE_FILTER_EXCLUDE_ROLE_NAME_PATTERNS="$YAML_ROLE_FILTER_EXCLUDE_ROLE_NAME_PATTERNS"
+    [[ -n "${YAML_DEBUG:-}" ]] && DEBUG="$YAML_DEBUG"
+    [[ -n "${YAML_DEBUG_LOG_FILE:-}" ]] && DEBUG_LOG_FILE="$YAML_DEBUG_LOG_FILE"
 
     echo_info "Loaded deployment configuration from $CONFIG_FILE"
 fi
@@ -805,6 +924,15 @@ while [[ $# -gt 0 ]]; do
             UNUSED_ROLE_DISPATCHER_LEASE_SECONDS="$2"
             shift 2
             ;;
+        --debug)
+            DEBUG="true"
+            shift 1
+            ;;
+        --debug-log-file)
+            DEBUG_LOG_FILE="$2"
+            DEBUG="true"
+            shift 2
+            ;;
         --help)
             echo "Usage: $0 [OPTIONS]"
             echo ""
@@ -888,7 +1016,7 @@ while [[ $# -gt 0 ]]; do
             echo "                                    Name of the cross-account role assumed in the delegated"
             echo "                                    administrator account (default: AriaAccessAnalyzerPollerRole)"
             echo "  --access-analyzer-poller-max-poll-attempts N"
-            echo "                                    Max re-invocations per finding family per Polling_Cycle"
+            echo "                                    Max re-invocations per finding family per polling cycle"
             echo "                                    while it still has unfetched findings (default: 6)."
             echo "                                    Raise temporarily (e.g. 20-30) for a large initial"
             echo "                                    backfill (10k+ findings on first run), then lower back"
@@ -916,6 +1044,10 @@ while [[ $# -gt 0 ]]; do
             echo "                                    Prevent overlapping unused-role dispatch runs (default: 900)."
             echo ""
             echo "Other Options:"
+            echo "  --debug                           Write verbose debug output, including the full AWS CLI"
+            echo "                                    stdout/stderr that is normally suppressed. Use this to"
+            echo "                                    diagnose deployments that otherwise fail silently."
+            echo "  --debug-log-file PATH             Also append debug output to PATH (implies --debug)"
             echo "  --help                            Show this help message"
             echo ""
             echo "Examples:"
@@ -949,6 +1081,16 @@ while [[ $# -gt 0 ]]; do
             ;;
     esac
 done
+
+# A debug log file implies debug output is enabled. Confirm the file is
+# writable now so a later run_cmd tee does not fail mid-deployment.
+if [[ -n "$DEBUG_LOG_FILE" ]]; then
+    DEBUG="true"
+    if ! touch "$DEBUG_LOG_FILE" 2>/dev/null; then
+        echo_error "Debug log file is not writable: $DEBUG_LOG_FILE"
+        exit 1
+    fi
+fi
 
 # Run main function
 main

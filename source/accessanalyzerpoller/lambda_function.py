@@ -2,6 +2,7 @@ import json
 import os
 import re
 import time
+from fnmatch import fnmatchcase
 import boto3
 from datetime import datetime
 from botocore.config import Config
@@ -9,7 +10,7 @@ from botocore.exceptions import ClientError
 
 # Reuse clients/resources across warm invocations rather than recreating them
 # per invocation - this Lambda calls sts:AssumeRole and the Access Analyzer
-# API once per Polling_Cycle, so adaptive retries absorb any throttling from
+# API once per polling cycle, so adaptive retries absorb any throttling from
 # those calls without needing per-call backoff plumbing.
 BOTO_CONFIG = Config(
     retries={'max_attempts': 5, 'mode': 'adaptive'},
@@ -31,14 +32,14 @@ FINDING_FETCH_DELAY_SECONDS = 1.0 / FINDING_FETCH_RATE_LIMIT_RPS
 # context.get_remaining_time_in_millis() so the fetch loop bails out early
 # (reporting more_work=True) instead of running until Lambda kills the
 # invocation mid-call, which would drop the whole family's progress for this
-# Polling_Cycle instead of the partial progress already made.
+# polling cycle instead of the partial progress already made.
 FETCH_LOOP_TIME_BUDGET_BUFFER_MS = 60_000
 
 # Upper bound on how many times the Step Functions state machine re-invokes
 # the same family's Task while it keeps reporting more_work=True (see
 # templates/step-functions.yaml). Caps a single family's catch-up at roughly
 # MAX_POLL_ATTEMPTS_PER_FAMILY * 15 minutes; any findings still unprocessed
-# after that are simply picked up on the next scheduled Polling_Cycle rather
+# after that are simply picked up on the next scheduled polling cycle rather
 # than looping indefinitely. Overridable via the MAX_POLL_ATTEMPTS_PER_FAMILY
 # environment variable (see templates/lambda-functions.yaml's
 # AccessAnalyzerPollerMaxPollAttempts parameter) so a large initial backfill
@@ -79,7 +80,7 @@ sts_client = boto3.client('sts', config=BOTO_CONFIG)
 # Shares BOTO_CONFIG's adaptive retries/larger pool with the Access Analyzer
 # client - without this, DynamoDB calls fell back to botocore's default
 # 'legacy' retry mode and a small connection pool, which is a poor fit for
-# the batch writes reconcile_family issues per Polling_Cycle.
+# the batch writes reconcile_family issues per polling cycle.
 dynamodb = boto3.resource('dynamodb', config=BOTO_CONFIG)
 
 # Delegated administrator account/role this Lambda assumes into before it can
@@ -105,9 +106,9 @@ def get_delegated_admin_client(current_account_id):
     AccessAnalyzerPollerManagedPolicy alongside the cross-account AssumeRole
     grant. Only when the two accounts differ does this assume
     AriaAccessAnalyzerPollerRole (mirrors the ROLE_TO_ASSUME pattern in
-    source/getiamroles/lambda_function.py) in the Delegated_Administrator_Account.
+    source/getiamroles/lambda_function.py) in the delegated administrator account.
     Credentials are re-assumed per invocation; this Lambda runs infrequently
-    (once per Polling_Cycle) so no warm-start cache.
+    (once per polling cycle) so no warm-start cache.
     """
     if current_account_id == DELEGATED_ADMIN_ACCOUNT_ID:
         print("get_delegated_admin_client: same-account fast path, no AssumeRole")
@@ -132,13 +133,13 @@ def get_delegated_admin_client(current_account_id):
 def list_active_finding_ids(client, analyzer_arn):
     """Return a mapping of ACTIVE finding id -> its current updatedAt timestamp.
 
-    Requirement 3.1/3.3: filters on status=ACTIVE and fully paginates via
+    Filters on status=ACTIVE and fully paginates via
     the list_findings_v2 paginator so every page for this analyzer is
     aggregated before returning. FindingSummaryV2 already carries updatedAt
     at no extra API cost beyond the list call itself, so reconcile_family
     can diff it against what is already stored to skip re-fetching (via
     GetFindingV2) any finding that has not changed since the last
-    Polling_Cycle - see reconcile_family for why that matters.
+    polling cycle - see reconcile_family for why that matters.
     """
     start = time.monotonic()
     active = {}
@@ -162,7 +163,7 @@ def list_active_finding_ids(client, analyzer_arn):
 def fetch_finding_detail(client, analyzer_arn, finding_id):
     """Fetch the full finding detail for a finding id from the same analyzer.
 
-    Requirement 3.2: full detail is retrieved before any table row is
+    Full detail is retrieved before any table row is
     populated for that finding id. Returns (finding_v2, elapsed_ms) so
     reconcile_family can track per-call latency without a second timer at
     every call site; a call that individually exceeds
@@ -204,7 +205,7 @@ def to_legacy_detail(family, finding_v2):
     finding events. GetFindingV2 instead returns top-level fields plus a
     findingDetails list holding family-specific nested detail objects. This
     adapter reconstructs the legacy shape so the parsing functions can be
-    invoked unchanged (Requirements 3.4, 4.1, 4.2, 4.3).
+    invoked unchanged.
     """
     detail = {
         'id': finding_v2['id'],
@@ -262,7 +263,7 @@ def to_legacy_detail(family, finding_v2):
 def poll_analyzer_with_retry(fn, *args, max_attempts=4, **kwargs):
     """Call fn with a bounded, exponential-backoff retry policy.
 
-    Requirement 9.1: bounded retry with backoff before a call is treated
+    Bounded retry with backoff before a call is treated
     as failed. Reuses the retryable-error set already applied via BOTO_CONFIG
     for throttling; this wrapper additionally retries transient errors that
     adaptive retries inside botocore do not cover (e.g. connection resets)
@@ -282,15 +283,50 @@ def poll_analyzer_with_retry(fn, *args, max_attempts=4, **kwargs):
     raise last_error
 
 
-# Roles provisioned by IAM Identity Center live under this reserved path. The
-# poller scopes internal/unused access findings to "roles we visualize": an
-# IdC/SSO role or an Account Access Manager (AAM) entitled role. NOTE: this
-# matches the standard 'aws' partition only, mirroring the previous
-# EventBridge-based ingestion Lambda; broaden the partition segment (e.g.
-# arn:[^:]+:iam::) for GovCloud/China.
-_SSO_ROLE_PATTERN = re.compile(
-    r'^arn:aws:iam::\d+:role/aws-reserved/sso\.amazonaws\.com/AWSReservedSSO_'
+# IAM Identity Center permission sets and AAM roles are controlled as binary
+# categories. Role-name patterns continue to select other roles. When either
+# category is false, no role in that category can be restored by a pattern.
+def _load_boolean(env_name, default):
+    raw_value = os.environ.get(env_name, default).lower()
+    if raw_value == 'true':
+        return True
+    if raw_value == 'false':
+        return False
+    raise ValueError(f"{env_name} must be 'true' or 'false'")
+
+
+def _load_json_string_list(env_name):
+    raw_value = os.environ.get(env_name, '[]')
+    try:
+        values = json.loads(raw_value)
+    except json.JSONDecodeError as error:
+        raise ValueError(f"{env_name} must be a JSON array of strings") from error
+    if not isinstance(values, list) or any(not isinstance(value, str) or not value for value in values):
+        raise ValueError(f"{env_name} must be a JSON array of non-empty strings")
+    return tuple(values)
+
+
+ROLE_FILTER_INCLUDE_PERMISSION_SETS = _load_boolean(
+    'ROLE_FILTER_INCLUDE_PERMISSION_SETS',
+    'true',
 )
+ROLE_FILTER_INCLUDE_AAM_ROLES = _load_boolean(
+    'ROLE_FILTER_INCLUDE_AAM_ROLES',
+    'true',
+)
+ROLE_FILTER_INCLUDE_ROLE_NAME_PATTERNS = _load_json_string_list(
+    'ROLE_FILTER_INCLUDE_ROLE_NAME_PATTERNS'
+)
+# Denylist that overrides every include selector: a role whose name matches one
+# of these patterns is excluded even if it is a permission-set or AAM role, or
+# matches an include pattern. Empty means exclude nothing.
+ROLE_FILTER_EXCLUDE_ROLE_NAME_PATTERNS = _load_json_string_list(
+    'ROLE_FILTER_EXCLUDE_ROLE_NAME_PATTERNS'
+)
+
+_SSO_ROLE_PREFIX = 'AWSReservedSSO_'
+_SSO_ROLE_SUFFIX_PATTERN = re.compile(r'_[A-Za-z0-9]{16}$')
+
 
 # Module-level cache of AAM-entitled role ARNs, shared across warm invocations so
 # a burst of findings on one container triggers at most one table scan per TTL
@@ -333,23 +369,96 @@ def get_aam_role_arns():
     return role_arns
 
 
-def is_tracked_role(role_arn):
-    """True if this role is one we visualize: an IdC (SSO) role or an AAM role.
+def _role_name_from_arn(role_arn):
+    """Return the trailing IAM role name from a role ARN, or None."""
+    if not isinstance(role_arn, str):
+        return None
+    fields = role_arn.split(':', 5)
+    if len(fields) != 6 or fields[0] != 'arn' or fields[2] != 'iam':
+        return None
+    resource = fields[5]
+    if not resource.startswith('role/'):
+        return None
+    role_name = resource.rsplit('/', 1)[-1]
+    return role_name or None
 
-    The cheap SSO path check runs first so SSO findings never trigger a scan.
-    """
-    if not role_arn:
+
+def _is_permission_set_role_arn(role_arn):
+    """Return whether an ARN uses IAM Identity Center's reserved role path."""
+    if not isinstance(role_arn, str):
         return False
-    if _SSO_ROLE_PATTERN.match(role_arn):
+    fields = role_arn.split(':', 5)
+    return (
+        len(fields) == 6
+        and fields[0] == 'arn'
+        and fields[2] == 'iam'
+        and fields[5].startswith('role/aws-reserved/sso.amazonaws.com/')
+    )
+
+
+def _permission_set_name(role_name):
+    """Derive an Identity Center permission-set name from a role name."""
+    if not role_name or not role_name.startswith(_SSO_ROLE_PREFIX):
+        return None
+    permission_set_name = role_name[len(_SSO_ROLE_PREFIX):]
+    suffix = _SSO_ROLE_SUFFIX_PATTERN.search(permission_set_name)
+    if suffix:
+        permission_set_name = permission_set_name[:suffix.start()]
+    return permission_set_name or None
+
+
+def is_tracked_role(role_arn):
+    """Return whether a role is selected for Access Analyzer processing.
+
+    Permission-set and AAM roles use binary category selectors. When a category
+    is disabled, every role in that category is excluded even if it matches a
+    role-name pattern or the other category.
+    """
+    role_name = _role_name_from_arn(role_arn)
+    if not role_name:
+        return False
+
+    # Exclude patterns are an absolute denylist: they win over the
+    # permission-set/AAM category inclusion and over include patterns.
+    if any(
+        fnmatchcase(role_name, pattern)
+        for pattern in ROLE_FILTER_EXCLUDE_ROLE_NAME_PATTERNS
+    ):
+        return False
+
+    permission_set_name = (
+        _permission_set_name(role_name)
+        if _is_permission_set_role_arn(role_arn)
+        else None
+    )
+    if permission_set_name and not ROLE_FILTER_INCLUDE_PERMISSION_SETS:
+        return False
+
+    is_aam_role = role_arn in get_aam_role_arns()
+    if is_aam_role and not ROLE_FILTER_INCLUDE_AAM_ROLES:
+        return False
+    if permission_set_name or is_aam_role:
         return True
-    return role_arn in get_aam_role_arns()
+
+    return any(
+        fnmatchcase(role_name, pattern)
+        for pattern in ROLE_FILTER_INCLUDE_ROLE_NAME_PATTERNS
+    )
+
+
+def stored_internal_scope_filter(item):
+    """Apply the current role selector to an already-stored internal finding."""
+    return (
+        item.get('PrincipalType') == 'IAM_ROLE'
+        and is_tracked_role(item.get('Principal', ''))
+    )
 
 
 def internal_scope_filter(detail):
-    """Scope filter for internal access findings (Requirement 6.1, 6.3, 6.5).
+    """Scope filter for internal access findings.
 
     Only IAM_ROLE principals are eligible, and the principal role ARN must
-    be a Tracked_Role (an IdC/SSO role or an AAM-entitled role).
+    be a tracked role (an IdC/SSO role or an AAM-entitled role).
     """
     if detail.get('principalType') != 'IAM_ROLE':
         return False
@@ -357,10 +466,10 @@ def internal_scope_filter(detail):
 
 
 def unused_scope_filter(detail):
-    """Scope filter for unused access findings (Requirement 6.2, 6.3, 6.5).
+    """Scope filter for unused access findings.
 
     Only AWS::IAM::Role resources are eligible, and the resource role ARN
-    must be a Tracked_Role (an IdC/SSO role or an AAM-entitled role).
+    must be a tracked role (an IdC/SSO role or an AAM-entitled role).
     """
     if detail.get('resourceType') != 'AWS::IAM::Role':
         return False
@@ -587,7 +696,7 @@ def _scan_all(table, **kwargs):
 
 
 # Maps a finding family name to the existing parsing function that upserts its
-# adapted detail into the family's finding table (Requirement 4.1, 4.2, 4.3).
+# adapted detail into the family's finding table.
 PARSERS = {
     'internal': parse_internalaccess_finding,
     'unused': parse_unusedaccess_finding,
@@ -595,17 +704,25 @@ PARSERS = {
 }
 
 
-def reconcile_family(family, client, analyzer_arn, table, context, scope_filter=None):
-    """Reconcile one finding family's table against its analyzer's Active_Finding set.
+def reconcile_family(
+    family,
+    client,
+    analyzer_arn,
+    table,
+    context,
+    scope_filter=None,
+    stored_scope_filter=None,
+):
+    """Reconcile one finding family's table against its analyzer's set of active findings.
 
     For every ACTIVE finding that is new or has changed (updatedAt differs
     from the value already stored for that FindingId), fetch its full
     detail, adapt it to the legacy shape, apply the optional scope filter,
-    and upsert a row (Requirements 4.4, 4.5, 6.x). A finding whose stored
+    and upsert a row. A finding whose stored
     UpdatedAt already matches the analyzer's current updatedAt is skipped
     entirely - no GetFindingV2 call, no write - since Access Analyzer
     findings stay ACTIVE indefinitely until resolved, so most findings on
-    any given Polling_Cycle are unchanged since the last one.
+    any given polling cycle are unchanged since the last one.
 
     Both the upsert loop and the stale-delete pass write through a
     `table.batch_writer()` rather than one put_item/delete_item call per
@@ -643,20 +760,28 @@ def reconcile_family(family, client, analyzer_arn, table, context, scope_filter=
     active_ids = set(active)
 
     scan_start = time.monotonic()
-    existing_items = _scan_all(table, ProjectionExpression='FindingId, UpdatedAt')
+    existing_items = _scan_all(
+        table,
+        ProjectionExpression='FindingId, UpdatedAt, Principal, PrincipalType',
+    )
     scan_ms = (time.monotonic() - scan_start) * 1000
     existing_updated_at = {item['FindingId']: item.get('UpdatedAt') for item in existing_items}
     existing_ids = set(existing_updated_at)
+    existing_out_of_scope_ids = {
+        item['FindingId']
+        for item in existing_items
+        if stored_scope_filter is not None and not stored_scope_filter(item)
+    }
     print(
         f"reconcile_family[{family}]: table scan returned {len(existing_items)} "
         f"existing row(s) in {scan_ms:.0f} ms"
     )
 
     to_fetch = [
-        finding_id for finding_id in active_ids
+        finding_id for finding_id in active_ids - existing_out_of_scope_ids
         if existing_updated_at.get(finding_id) != active[finding_id]
     ]
-    already_current = len(active_ids) - len(to_fetch)
+    already_current = len(active_ids - existing_out_of_scope_ids) - len(to_fetch)
     print(
         f"reconcile_family[{family}]: {len(to_fetch)} finding(s) to fetch this "
         f"cycle, {already_current} already current"
@@ -708,7 +833,7 @@ def reconcile_family(family, client, analyzer_arn, table, context, scope_filter=
 
             detail = to_legacy_detail(family, finding_v2)
             if 'error' in detail:
-                # Requirement 3.4: error-finding detail, no row to write.
+                # Error-finding detail, no row to write.
                 skipped_errors += 1
                 continue
 
@@ -729,7 +854,7 @@ def reconcile_family(family, client, analyzer_arn, table, context, scope_filter=
                     print(f"SLOW_WRITE: queuing {finding_id} for {family} took {write_ms:.0f} ms")
                 upserted += 1
             except Exception as e:
-                # Requirement 9.4: log and continue past a single malformed finding.
+                # Log and continue past a single malformed finding.
                 print(f"Error parsing {family} finding {finding_id}: {e}")
                 parse_errors += 1
 
@@ -745,7 +870,7 @@ def reconcile_family(family, client, analyzer_arn, table, context, scope_filter=
     delete_start = time.monotonic()
     deleted = 0
     if not more_work:
-        stale_ids = existing_ids - active_ids
+        stale_ids = (existing_ids - active_ids) | existing_out_of_scope_ids
         with table.batch_writer() as batch:
             for stale_id in stale_ids:
                 batch.delete_item(Key={'FindingId': str(stale_id)})
@@ -774,7 +899,7 @@ def reconcile_family(family, client, analyzer_arn, table, context, scope_filter=
 
 
 def lambda_handler(event, context):
-    """Entry point for one Polling_Cycle across internal and external families.
+    """Entry point for one polling cycle across internal and external families.
 
     The unused IAM-role family is intentionally not handled here. Its summary
     dispatcher and strict-global-RPS SQS detail worker live in
@@ -805,8 +930,14 @@ def lambda_handler(event, context):
     # strict-global-RPS worker. This legacy Step Functions handler therefore
     # retains only the internal and external families.
     families = [
-        ('internal', INTERNAL_ACCESS_ANALYZER_ARN, 'AriaIdCInternalAAFindings', internal_scope_filter),
-        ('external', EXTERNAL_ACCESS_ANALYZER_ARN, 'AriaIdCExternalAAFindings', None),
+        (
+            'internal',
+            INTERNAL_ACCESS_ANALYZER_ARN,
+            'AriaIdCInternalAAFindings',
+            internal_scope_filter,
+            stored_internal_scope_filter,
+        ),
+        ('external', EXTERNAL_ACCESS_ANALYZER_ARN, 'AriaIdCExternalAAFindings', None, None),
     ]
 
     requested_family = event.get('family') if isinstance(event, dict) else None
@@ -828,24 +959,31 @@ def lambda_handler(event, context):
     results = []
     family_failures = []
 
-    for family, analyzer_arn, table_name, scope_filter in families:
+    for family, analyzer_arn, table_name, scope_filter, stored_scope_filter in families:
         table = dynamodb.Table(table_name)
         family_start = time.monotonic()
         try:
             result = poll_analyzer_with_retry(
-                reconcile_family, family, client, analyzer_arn, table, context, scope_filter
+                reconcile_family,
+                family,
+                client,
+                analyzer_arn,
+                table,
+                context,
+                scope_filter,
+                stored_scope_filter,
             )
             if result['more_work'] and poll_attempt >= MAX_POLL_ATTEMPTS_PER_FAMILY:
                 print(
                     f"Family '{family}' still has unfetched changed/new findings after "
                     f"{poll_attempt} poll attempts; deferring the remainder to the next "
-                    "scheduled Polling_Cycle instead of looping further."
+                    "scheduled polling cycle instead of looping further."
                 )
                 result['more_work'] = False
             results.append(result)
             family_elapsed_ms = (time.monotonic() - family_start) * 1000
             print(
-                f"Polling_Cycle summary [{family}]: upserted={result['upserted']} "
+                f"Polling cycle summary [{family}]: upserted={result['upserted']} "
                 f"deleted={result['deleted']} already_current={result['already_current']} "
                 f"skipped_out_of_scope={result['skipped_out_of_scope']} "
                 f"skipped_errors={result['skipped_errors']} parse_errors={result['parse_errors']} "
@@ -854,7 +992,7 @@ def lambda_handler(event, context):
         except ClientError as e:
             print(f"Finding family '{family}' failed after retries: {e}")
             family_failures.append(family)
-            # Requirement 2.5/9.2: continue with the remaining families.
+            # Continue with the remaining families.
             continue
 
     status_code = 200 if not family_failures else 500

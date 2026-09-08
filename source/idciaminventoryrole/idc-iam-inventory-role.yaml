@@ -51,7 +51,7 @@ Resources:
               # under this assumed inventory role.
               # NOTE: This role is deployed per member account via StackSet. The updated
               # template must be redeployed to all member accounts before the
-              # Chain_Capable_Roles source can populate rows - otherwise these reads fail
+              # chain-capable roles source can populate rows - otherwise these reads fail
               # and every chain-capable role is silently classified as not chain-capable.
               - Effect: Allow
                 Action:
