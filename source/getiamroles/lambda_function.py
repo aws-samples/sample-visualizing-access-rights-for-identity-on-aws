@@ -1,6 +1,7 @@
 import json
 import os
 import re
+from fnmatch import fnmatchcase
 from urllib.parse import unquote
 import boto3
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -27,9 +28,51 @@ MAX_WORKERS = int(os.environ.get('MAX_WORKERS', '10'))
 # in-flight results can still be flushed to DynamoDB before the Lambda timeout.
 RUNTIME_SAFETY_BUFFER_MS = 30_000
 
-# Length of the trailing "_<random-suffix>" that IAM Identity Center appends to
-# AWSReservedSSO_<PermissionSetName> role names.
-SSO_ROLE_SUFFIX_LEN = 17
+_SSO_ROLE_PREFIX = 'AWSReservedSSO_'
+_SSO_ROLE_SUFFIX_PATTERN = re.compile(r'_[A-Za-z0-9]{16}$')
+
+
+# IAM Identity Center permission sets and AAM roles are controlled as binary
+# categories. Role-name patterns continue to select other roles. When either
+# category is false, no role in that category can be restored by a pattern.
+def _load_boolean(env_name, default):
+    raw_value = os.environ.get(env_name, default).lower()
+    if raw_value == 'true':
+        return True
+    if raw_value == 'false':
+        return False
+    raise ValueError(f"{env_name} must be 'true' or 'false'")
+
+
+def _load_json_string_list(env_name):
+    raw_value = os.environ.get(env_name, '[]')
+    try:
+        values = json.loads(raw_value)
+    except json.JSONDecodeError as error:
+        raise ValueError(f"{env_name} must be a JSON array of strings") from error
+    if not isinstance(values, list) or any(not isinstance(value, str) or not value for value in values):
+        raise ValueError(f"{env_name} must be a JSON array of non-empty strings")
+    return tuple(values)
+
+
+ROLE_FILTER_INCLUDE_PERMISSION_SETS = _load_boolean(
+    'ROLE_FILTER_INCLUDE_PERMISSION_SETS',
+    'true',
+)
+ROLE_FILTER_INCLUDE_AAM_ROLES = _load_boolean(
+    'ROLE_FILTER_INCLUDE_AAM_ROLES',
+    'true',
+)
+ROLE_FILTER_INCLUDE_ROLE_NAME_PATTERNS = _load_json_string_list(
+    'ROLE_FILTER_INCLUDE_ROLE_NAME_PATTERNS'
+)
+# Denylist that overrides every include selector: a role whose name matches one
+# of these patterns is excluded even if it is a permission-set or AAM role, or
+# matches an include pattern. Empty means exclude nothing.
+ROLE_FILTER_EXCLUDE_ROLE_NAME_PATTERNS = _load_json_string_list(
+    'ROLE_FILTER_EXCLUDE_ROLE_NAME_PATTERNS'
+)
+
 
 # sts:AssumeRole-family actions, lowercased for case-insensitive matching. Used
 # both for the trust-policy Action gate and the permission-policy chain-capable test.
@@ -94,8 +137,7 @@ def parse_trust_document(raw_document):
 
 def normalize_principal(principal_value):
     # Map a single Principal.AWS value to a qualifying IAM role/user ARN, or None
-    # if it should be dropped. See the design's "Principal Normalization
-    # Algorithm" (Req 3.2, 3.3, 3.4, 3.5).
+    # if it should be dropped.
     #
     # Kept  : arn:aws:iam::<acct>:role/<path/name>   (IAM role ARN)
     #         arn:aws:iam::<acct>:user/<path/name>   (IAM user ARN)
@@ -137,13 +179,13 @@ def normalize_principal(principal_value):
 
 def extract_qualifying_principals(trust_document):
     # Walk the trust policy's statements and collect the set of qualifying IAM
-    # role/user principal ARNs (Req 3.1, 3.6).
+    # role/user principal ARNs.
     #
     # For each Effect==Allow statement whose Action (string or list, compared
     # case-insensitively) intersects ASSUME_ROLE_ACTIONS, read Principal.AWS
     # (string or list), run each value through normalize_principal, and collect
     # the non-None results into a set. Only the AWS key of Principal is
-    # considered; Service / Federated / CanonicalUser keys are ignored (Req 3.3).
+    # considered; Service / Federated / CanonicalUser keys are ignored.
     #
     # A non-empty result also serves as the cheap first gate of the chain-capable
     # test: it means the role trusts at least one concrete IAM principal.
@@ -193,7 +235,7 @@ def extract_qualifying_principals(trust_document):
 def _action_grants_assume_role(action):
     # True if the statement's Action (string or list) contains at least one
     # sts:AssumeRole-family action, compared case-insensitively. Used as the
-    # trust-policy Action gate in extract_qualifying_principals (Req 3.1).
+    # trust-policy Action gate in extract_qualifying_principals.
     if isinstance(action, str):
         actions = [action]
     elif isinstance(action, list):
@@ -207,8 +249,7 @@ def _action_grants_assume_role(action):
 
 
 def parse_arn_identity(arn):
-    # Parse account id and trailing name from an IAM role/user ARN. See the
-    # design's "ARN identity parse" algorithm (Req 4.2, 5.4).
+    # Parse account id and trailing name from an IAM role/user ARN.
     #   arn:aws:iam::<acct>:role/<path.../><name>  or  .../user/<path.../><name>
     # AccountId is the 5th ':'-delimited field. Name is the last '/'-segment of
     # the resource (path-aware). Returns (account_id, name) or (None, None) if
@@ -231,7 +272,6 @@ def parse_arn_identity(arn):
 def classify_principal(arn):
     # Classify a normalized qualifying ARN as 'role', 'user', or None using the
     # same regexes used by normalize_principal (_IAM_ROLE_RE / _IAM_USER_RE).
-    # See the design's "Principal classification" algorithm.
     if _IAM_ROLE_RE.match(arn):
         return 'role'
     if _IAM_USER_RE.match(arn):
@@ -239,11 +279,73 @@ def classify_principal(arn):
     return None
 
 
-def list_all_roles_in_account(credentials, account_id):
+def permission_set_name_from_role(role_name, role_arn):
+    """Derive a permission-set name from an Identity Center role ARN."""
+    if not role_name or not role_name.startswith(_SSO_ROLE_PREFIX):
+        return None
+    if not isinstance(role_arn, str):
+        return None
+    fields = role_arn.split(':', 5)
+    if (
+        len(fields) != 6
+        or fields[0] != 'arn'
+        or fields[2] != 'iam'
+        or not fields[5].startswith('role/aws-reserved/sso.amazonaws.com/')
+    ):
+        return None
+    permission_set_name = role_name[len(_SSO_ROLE_PREFIX):]
+    suffix = _SSO_ROLE_SUFFIX_PATTERN.search(permission_set_name)
+    if suffix:
+        permission_set_name = permission_set_name[:suffix.start()]
+    return permission_set_name or None
+
+
+def is_selected_role(role, aam_role_arns):
+    """Return whether an IAM role belongs in the shared visualization scope."""
+    role_name = role.get('RoleName')
+    role_arn = role.get('Arn')
+    if not role_name or not role_arn:
+        return False
+
+    # Exclude patterns are an absolute denylist: they win over the
+    # permission-set/AAM category inclusion and over include patterns.
+    if any(
+        fnmatchcase(role_name, pattern)
+        for pattern in ROLE_FILTER_EXCLUDE_ROLE_NAME_PATTERNS
+    ):
+        return False
+
+    permission_set_name = permission_set_name_from_role(role_name, role_arn)
+    if permission_set_name and not ROLE_FILTER_INCLUDE_PERMISSION_SETS:
+        return False
+
+    is_aam_role = role_arn in aam_role_arns
+    if is_aam_role and not ROLE_FILTER_INCLUDE_AAM_ROLES:
+        return False
+    if permission_set_name or is_aam_role:
+        return True
+
+    return any(
+        fnmatchcase(role_name, pattern)
+        for pattern in ROLE_FILTER_INCLUDE_ROLE_NAME_PATTERNS
+    )
+
+
+def build_aam_role_arns():
+    """Return the IAM role ARNs represented in Account Access Manager data."""
+    table = dynamodb.Table('AriaIdCAccountAccessAssignments')
+    return {
+        item['IamRoleArn']
+        for item in _scan_all(table, ProjectionExpression='IamRoleArn')
+        if item.get('IamRoleArn')
+    }
+
+
+def list_all_roles_in_account(credentials, account_id, aam_role_arns):
     # List EVERY IAM role in the account via the list_roles paginator (no name
     # filter). list_roles returns AssumeRolePolicyDocument on each role object,
     # so no per-role get_role call is needed; attached policies are read per role
-    # via list_attached_role_policies, as today (Req 1.1).
+    # via list_attached_role_policies, as today.
     #
     # Returns [{'AccountId','RoleName','RoleId','Arn','AttachedPolicies',
     #           'CreateDate','AssumeRolePolicyDocument'}].
@@ -263,8 +365,10 @@ def list_all_roles_in_account(credentials, account_id):
         paginator = iam.get_paginator('list_roles')
         for page in paginator.paginate():
             for role in page['Roles']:
+                if not is_selected_role(role, aam_role_arns):
+                    continue
                 # Wrap per-role work so a malformed/failing single role is logged
-                # and skipped without aborting the whole account (Req 1.9).
+                # and skipped without aborting the whole account.
                 try:
                     policies = iam.list_attached_role_policies(RoleName=role['RoleName'])
                     roles.append({
@@ -304,14 +408,13 @@ def build_provisioned_permission_set_index():
 
 def build_role_item(role, permset_index):
     # Build the enriched AriaIdCIAMRoles item for one enumerated role (role is a
-    # dict from list_all_roles_in_account). See the design's "Components >
-    # GetIAMRoles build_role_item" and the "enriched enumerated role" data model.
+    # dict from list_all_roles_in_account).
     #
     # TrustedPrincipals is always present: a sorted list of the normalized
-    # qualifying principal ARNs, possibly empty (Req 2.2). It is what drives the
+    # qualifying principal ARNs, possibly empty. It is what drives the
     # CAN_ASSUME edges downstream.
     #
-    # TrustPolicyDocument (the decoded trust policy as a JSON string, Req 2.1) is
+    # TrustPolicyDocument (the decoded trust policy as a JSON string) is
     # stored ONLY for roles that yield at least one qualifying trusted principal
     # (TrustedPrincipals non-empty). Most roles trust only AWS services,
     # account-root, or federated providers and yield no qualifying principals;
@@ -319,12 +422,10 @@ def build_role_item(role, permset_index):
     # those roles cuts item size and in-memory footprint at large-org scale.
     # Because TrustedPrincipals (not the raw document) drives the CAN_ASSUME
     # edges, dropping the document for non-trusting roles loses no graph data.
-    # Req 2.1's "store the raw trust document" therefore now applies only to
-    # roles with qualifying principals.
     #
-    # Source is 'PermissionSet' for SSO roles else 'IAM' (Req 3.1, 3.2). SSO
+    # Source is 'PermissionSet' for SSO roles else 'IAM'. SSO
     # roles derive PermissionSetName/PermissionSetArn from permset_index; non-SSO
-    # roles keep the existing 'N/A' convention (Req 3.4, 3.5).
+    # roles keep the existing 'N/A' convention.
     account_id = role['AccountId']
     role_name = role['RoleName']
 
@@ -333,15 +434,13 @@ def build_role_item(role, permset_index):
     trust_document = parse_trust_document(role.get('AssumeRolePolicyDocument'))
     trusted_principals = sorted(extract_qualifying_principals(trust_document))
 
-    if role_name.startswith('AWSReservedSSO_'):
+    permission_set_name = permission_set_name_from_role(role_name, role['Arn'])
+    if permission_set_name:
         source = 'PermissionSet'
-        # Strip the "AWSReservedSSO_" prefix and the trailing "_<suffix>",
-        # exactly as collect_roles_for_account does.
-        permsetname = role_name.replace('AWSReservedSSO_', '')[:-SSO_ROLE_SUFFIX_LEN]
-        permsetarn = permset_index.get(account_id, {}).get(permsetname, 'N/A')
+        permsetarn = permset_index.get(account_id, {}).get(permission_set_name, 'N/A')
     else:
         source = 'IAM'
-        permsetname = 'N/A'
+        permission_set_name = 'N/A'
         permsetarn = 'N/A'
 
     item = {
@@ -353,7 +452,7 @@ def build_role_item(role, permset_index):
         'CreateDate': role['CreateDate'].isoformat(),
         'TrustedPrincipals': trusted_principals,
         'Source': source,
-        'PermissionSetName': permsetname,
+        'PermissionSetName': permission_set_name,
         'PermissionSetArn': permsetarn
     }
 
@@ -368,8 +467,7 @@ def build_role_item(role, permset_index):
 
 def build_role_stub(arn):
     # Minimal backfill role item for a trusted IAM-role principal that was not
-    # otherwise enumerated. See the design's "backfilled role stub" data model
-    # (Req 4.1, 4.2, 4.3). RoleName and AccountId are parsed from the ARN;
+    # otherwise enumerated. RoleName and AccountId are parsed from the ARN;
     # trust, permission-set, and attached-policy attributes are intentionally
     # absent. Source is 'TrustPolicy'.
     account_id, name = parse_arn_identity(arn)
@@ -382,8 +480,7 @@ def build_role_stub(arn):
 
 
 def build_user_stub(arn):
-    # Minimal backfill user item for a trusted IAM-user principal. See the
-    # design's "backfilled user stub" data model (Req 5.3, 5.4). UserName and
+    # Minimal backfill user item for a trusted IAM-user principal. UserName and
     # AccountId are parsed from the ARN; Source is 'TrustPolicy'.
     account_id, name = parse_arn_identity(arn)
     return {
@@ -396,18 +493,16 @@ def build_user_stub(arn):
 
 def compute_backfill(enumerated_arns, trusted_principals):
     # Pure function computing the backfill stubs from the full enumerated set and
-    # the union of trusted principals across all roles. See the design's
-    # "Components > GetIAMRoles compute_backfill" and the "Backfill dedupe"
-    # algorithm (Req 4.1, 4.4, 5.3, 5.5).
+    # the union of trusted principals across all roles.
     #
     #   enumerated_arns:     set of IamRoleArn of enumerated roles (E)
     #   trusted_principals:  set/iterable of normalized qualifying ARNs (T)
     #
     # T is partitioned by classify_principal into role-typed and user-typed ARNs.
     # Role stubs are produced only for trusted role ARNs not already enumerated
-    # (T_role - E), so enumerated roles win over stubs (Req 4.4, Property 5).
+    # (T_role - E), so enumerated roles win over stubs.
     # User-typed ARNs route only to user stubs, and role-typed ARNs only to role
-    # stubs (Property 6). Sorting yields deterministic output, and set semantics
+    # stubs. Sorting yields deterministic output, and set semantics
     # mean a principal trusted by many roles yields at most one stub.
     t_role = {a for a in trusted_principals if classify_principal(a) == 'role'}
     t_user = {a for a in trusted_principals if classify_principal(a) == 'user'}
@@ -417,14 +512,13 @@ def compute_backfill(enumerated_arns, trusted_principals):
     return role_stubs, user_stubs
 
 
-def collect_roles_for_account(account_id, permset_index):
+def collect_roles_for_account(account_id, permset_index, aam_role_arns):
     # Assume into the account, list EVERY IAM role, and build one enriched item
-    # per enumerated role via build_role_item. See the design's "Components >
-    # GetIAMRoles collect_roles_for_account" (Req 1.1, 1.2). Runs inside a worker
+    # per enumerated role via build_role_item. Runs inside a worker
     # thread; performs only reads (no DynamoDB writes). Per-role resilience
-    # already lives in list_all_roles_in_account (Req 1.9).
+    # already lives in list_all_roles_in_account.
     credentials = assume_role(account_id, ROLE_TO_ASSUME)
-    roles = list_all_roles_in_account(credentials, account_id)
+    roles = list_all_roles_in_account(credentials, account_id, aam_role_arns)
     return [build_role_item(role, permset_index) for role in roles]
 
 
@@ -438,7 +532,7 @@ def empty_iam_roles_table():
 
 def empty_iam_users_table():
     # Empty the IAM users table before repopulating it, following the
-    # Empty_Then_Rebuild pattern (Req 5). Mirrors empty_iam_roles_table but
+    # empty-then-rebuild pattern. Mirrors empty_iam_roles_table but
     # deletes by the IamUserArn key.
     table = dynamodb.Table('AriaIdCIAMUsers')
     with table.batch_writer() as batch:
@@ -447,16 +541,16 @@ def empty_iam_users_table():
 
 
 def lambda_handler(event, context):
-    # Two-phase collect-then-backfill write model (see the design's "GetIAMRoles
-    # two-phase collect-then-backfill write model"). The collect phase fans out
+    # Two-phase collect-then-backfill write model. The collect phase fans out
     # per account on worker threads that only READ; the main thread accumulates
     # all enumerated items, the full set of enumerated role ARNs, and the union
     # of trusted principals. Only AFTER collection completes are the destination
     # tables emptied and rewritten, so a failed or truncated collect never blanks
-    # a table before its replacement data exists (Req 1.7, 4.4).
+    # a table before its replacement data exists.
 
-    # Build the permission-set lookup index once, up front.
+    # Build shared selection indexes once, up front.
     permset_index = build_provisioned_permission_set_index()
+    aam_role_arns = build_aam_role_arns()
 
     accounts_table = dynamodb.Table('AriaIdCAccounts')
     account_ids = [item['AccountId'] for item in _scan_all(accounts_table, ProjectionExpression='AccountId')]
@@ -478,7 +572,12 @@ def lambda_handler(event, context):
                 break
 
             future_to_account = {
-                executor.submit(collect_roles_for_account, account_id, permset_index): account_id
+                executor.submit(
+                    collect_roles_for_account,
+                    account_id,
+                    permset_index,
+                    aam_role_arns,
+                ): account_id
                 for account_id in chunk
             }
             for future in as_completed(future_to_account):

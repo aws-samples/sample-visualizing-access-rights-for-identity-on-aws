@@ -256,15 +256,15 @@ Parameters:
 
   InternalAccessAnalyzerArn:
     Type: String
-    Description: ARN of the ORGANIZATION_INTERNAL_ACCESS analyzer in the Delegated_Administrator_Account
+    Description: ARN of the ORGANIZATION_INTERNAL_ACCESS analyzer in the delegated administrator account
 
   ExternalAccessAnalyzerArn:
     Type: String
-    Description: ARN of the ORGANIZATION analyzer in the Delegated_Administrator_Account
+    Description: ARN of the ORGANIZATION analyzer in the delegated administrator account
 
   UnusedAccessAnalyzerArn:
     Type: String
-    Description: ARN of the ORGANIZATION_UNUSED_ACCESS analyzer in the Delegated_Administrator_Account
+    Description: ARN of the ORGANIZATION_UNUSED_ACCESS analyzer in the delegated administrator account
 
   DelegatedAdminAccountId:
     Type: String
@@ -281,7 +281,7 @@ Parameters:
     MinValue: 1
     MaxValue: 50
     Description: >-
-      Max Step Functions re-invocations per finding family per Polling_Cycle
+      Max Step Functions re-invocations per finding family per polling cycle
       while a family still has unfetched changed/new findings. Raise
       temporarily for a large initial backfill (e.g. 20-30 for 10k+ findings
       on first run), then lower back to the default once the backlog clears.
@@ -340,6 +340,35 @@ Parameters:
     MinValue: 60
     MaxValue: 3600
     Description: Lease duration that prevents overlapping unused-role dispatch runs
+
+  RoleFilterIncludePermissionSets:
+    Type: String
+    Default: "true"
+    AllowedValues:
+      - "true"
+      - "false"
+    Description: Include every IAM Identity Center permission-set role
+
+  RoleFilterIncludeAamRoles:
+    Type: String
+    Default: "true"
+    AllowedValues:
+      - "true"
+      - "false"
+    Description: Include every Account Access Manager role
+
+  RoleFilterIncludeRoleNamePatterns:
+    Type: String
+    Default: "[]"
+    Description: JSON array of shell-style IAM role-name patterns to include
+
+  RoleFilterExcludeRoleNamePatterns:
+    Type: String
+    Default: "[]"
+    Description: >-
+      JSON array of shell-style IAM role-name patterns to exclude. A matching
+      role is dropped even if it is a permission-set or AAM role or matches an
+      include pattern.
 
   # Access Analyzer Scheduling Parameters - the AriaAccessAnalyzerStateMachine
   # runs on its own schedule, independent of AriaStateMachine's identity data
@@ -423,6 +452,13 @@ Metadata:
           - UnusedRoleQueueVisibilityTimeoutSeconds
           - UnusedRoleQueueMaxReceiveCount
           - UnusedRoleDispatcherLeaseSeconds
+      - Label:
+          default: "Role Filtering"
+        Parameters:
+          - RoleFilterIncludePermissionSets
+          - RoleFilterIncludeAamRoles
+          - RoleFilterIncludeRoleNamePatterns
+          - RoleFilterExcludeRoleNamePatterns
       - Label:
           default: "Python Handler"
         Parameters:
@@ -513,6 +549,10 @@ Resources:
         UnusedRoleQueueVisibilityTimeoutSeconds: !Ref UnusedRoleQueueVisibilityTimeoutSeconds
         UnusedRoleQueueMaxReceiveCount: !Ref UnusedRoleQueueMaxReceiveCount
         UnusedRoleDispatcherLeaseSeconds: !Ref UnusedRoleDispatcherLeaseSeconds
+        RoleFilterIncludePermissionSets: !Ref RoleFilterIncludePermissionSets
+        RoleFilterIncludeAamRoles: !Ref RoleFilterIncludeAamRoles
+        RoleFilterIncludeRoleNamePatterns: !Ref RoleFilterIncludeRoleNamePatterns
+        RoleFilterExcludeRoleNamePatterns: !Ref RoleFilterExcludeRoleNamePatterns
       Tags:
         - Key: aria
           Value: nested-stack

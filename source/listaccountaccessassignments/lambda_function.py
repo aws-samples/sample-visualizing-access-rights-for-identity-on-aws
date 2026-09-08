@@ -55,7 +55,7 @@ def get_application_arn():
     #
     # Returning a false value (None) is deliberate: it signals "AAM not enabled /
     # no application found" so lambda_handler can be a graceful no-op rather than
-    # failing the collection workflow (Requirement 1.5).
+    # failing the collection workflow.
     try:
         # list_applications is paginated; a single call only returns the first
         # page, which can silently miss applications on later pages. Follow the
@@ -84,8 +84,8 @@ def get_application_arn():
 
 def load_principal_names():
     # Load principal id -> name maps once from the already-collected IdC tables so
-    # entitlement rows can be labelled without any Identity Store API calls
-    # (Requirement 2.4). This mirrors load_permission_set_names / load_account_names
+    # entitlement rows can be labelled without any Identity Store API calls.
+    # This mirrors load_permission_set_names / load_account_names
     # in listuseraccountassignments: a single full scan of each dependency table
     # into an in-memory dict, rather than a get_item per entitlement.
     #
@@ -96,7 +96,7 @@ def load_principal_names():
     #
     # Returns a (user_names, group_names) tuple of {id: name} dicts. Missing names
     # fall back to 'N/A' so a partially populated row never carries a null; callers
-    # that hit an id absent from these dicts also fall back to 'N/A' (Requirement 2.3).
+    # that hit an id absent from these dicts also fall back to 'N/A'.
     users_table = dynamodb.Table('AriaIdCUsers')
     groups_table = dynamodb.Table('AriaIdCGroups')
 
@@ -115,7 +115,7 @@ def build_role_arn(account_id, role_name, path='/'):
     # Defensive fallback for an entitlement that carries a role name + path
     # instead of a full ARN. The confirmed SDK model always returns a full
     # `roleArn` (path embedded), so this is not exercised by the current API, but
-    # Requirement 1.3 mandates a construction path so role identity stays
+    # a construction path is kept so role identity stays
     # consistent if the shape ever changes.
     #
     # The IAM role path must be preserved and must both start and end with '/'
@@ -198,8 +198,8 @@ def collect_entitlements(app_arn, principal_names):
     #
     # principal_names is the (user_names, group_names) tuple from
     # load_principal_names(). USER ids resolve to their user name, GROUP ids to
-    # their group name; a name missing from the dict falls back to 'N/A'
-    # (Requirement 2.3). I/O-bound calls are parallelised with the same
+    # their group name; a name missing from the dict falls back to 'N/A'.
+    # I/O-bound calls are parallelised with the same
     # ThreadPoolExecutor(MAX_WORKERS) pattern used by listuseraccountassignments.
     user_names, group_names = principal_names
     principals = [
@@ -231,7 +231,7 @@ def collect_entitlements(app_arn, principal_names):
 def empty_table(table):
     # Remove all existing rows before repopulating, so entitlements revoked since
     # the last run do not linger as stale rows or graph edges. The table is fully
-    # rebuilt on every run (Requirement 3.3). This mirrors the empty-then-rebuild
+    # rebuilt on every run. This mirrors the empty-then-rebuild
     # strategy in listuseraccountassignments: scan only the key attributes, then
     # batch-delete via a main-thread batch_writer.
     #
@@ -249,7 +249,7 @@ def lambda_handler(event, context):
     # Resolve the AAM application ARN first. A falsy result means Account Access
     # Manager is not enabled / no application exists in this region, so the
     # function is a graceful no-op: it returns success and leaves the table empty
-    # rather than failing the collection workflow (Requirement 1.5).
+    # rather than failing the collection workflow.
     try:
         app_arn = get_application_arn()
         if not app_arn:
@@ -266,8 +266,7 @@ def lambda_handler(event, context):
         rows = collect_entitlements(app_arn, principal_names)
 
         # Empty then rebuild so revoked entitlements do not persist as stale rows,
-        # storing one item per (PrincipalId, IamRoleArn) pair (Requirements 3.2,
-        # 3.3, 3.4).
+        # storing one item per (PrincipalId, IamRoleArn) pair.
         table = dynamodb.Table('AriaIdCAccountAccessAssignments')
         empty_table(table)
 

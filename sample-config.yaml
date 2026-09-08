@@ -101,3 +101,18 @@ accessAnalyzerPoller:
   # Prevents overlapping schedule executions from dispatching the same role
   # backlog concurrently.
   unusedRoleDispatcherLeaseSeconds: 900
+
+# IAM Identity Center permission sets and AAM roles are binary categories. Set
+# either switch to false to exclude every role in that category from Access
+# Analyzer and trust processing, even if another selector matches it.
+roleFiltering:
+  # Include or exclude every IdC Permission Set.
+  includePermissionSets: true
+  # Include or exclude every Account Access Manager role.
+  includeAamRoles: true
+  # Patterns to add other IAM roles to the selected scope, such as "App-*-Read".
+  includeRoleNamePatterns: []
+  # Denylist that trumps include selectors above: a role whose name
+  # matches one of these patterns is dropped even if it is a permission-set or
+  # AAM role, or matches an include pattern. Empty means exclude nothing.
+  excludeRoleNamePatterns: []
