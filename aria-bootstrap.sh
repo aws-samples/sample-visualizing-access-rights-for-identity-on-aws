@@ -47,17 +47,20 @@ echo "Aria Source Bucket is : $SOURCE_BUCKET"
 
 # Check if aria SOURCE_BUCKET exists - create if missing, add configure bucket for EventBridge notifications
 if aws s3api head-bucket --bucket "$SOURCE_BUCKET" > /dev/null 2>&1; then
+    echo "Source Bucket already exists"
+else
     echo "Source Bucket does not exist...creating..."
     aws s3api create-bucket \
         --bucket "$SOURCE_BUCKET" \
         --region "$REGION" \
-        $(if [ "$REGION" != "us-east-1" ]; then echo "--create-bucket-configuration LocationConstraint=$REGION"; fi) > /dev/null 2>&1
+        $(if [ "$REGION" != "us-east-1" ]; then echo "--create-bucket-configuration LocationConstraint=$REGION"; fi)
 fi
 
 # Configure EventBridge notifications (done once regardless of bucket existence)
 aws s3api put-bucket-notification-configuration \
     --bucket "$SOURCE_BUCKET" \
-    --notification-configuration '{"EventBridgeConfiguration": {}}' > /dev/null 2>&1
+    --region "$REGION" \
+    --notification-configuration '{"EventBridgeConfiguration": {}}'
 
 echo "Aria Export Bucket is : $EXPORT_BUCKET"
 
@@ -69,8 +72,9 @@ else
     aws s3api create-bucket \
         --bucket "$EXPORT_BUCKET" \
         --region "$REGION" \
-        $(if [ "$REGION" != "us-east-1" ]; then echo "--create-bucket-configuration LocationConstraint=$REGION"; fi) > /dev/null 2>&1
+        $(if [ "$REGION" != "us-east-1" ]; then echo "--create-bucket-configuration LocationConstraint=$REGION"; fi)
 fi
+
 # Create Lambda function zip files
 echo "Creating directories and zip files..."
 
@@ -125,9 +129,11 @@ for func in "${LAMBDA_FUNCTIONS[@]}"; do
     mkdir -p "$BUILD_DIR"
     cp "./source/${func}/lambda_function.py" "$BUILD_DIR/"
     $PIP install -r "./source/${func}/requirements.txt" --target "$BUILD_DIR" --quiet
+
     # Zip the handler + deps at the archive root. Exclude compiled/console-script
     # cruft (__pycache__, *.pyc, bin/) so only the importable payload ships.
     (cd "$BUILD_DIR" && zip -r "$ZIP_DIR/${func}.zip" . -x "*__pycache__*" -x "*.pyc" -x "bin/*" > /dev/null)
+
     rm -rf "$BUILD_DIR"
   else
     # Most functions contain only lambda_function.py. The Access Analyzer
@@ -141,8 +147,8 @@ echo "Zip files created successfully!"
 
 # Copy files to SOURCE_BUCKET
 echo "Uploading zip files to S3 bucket: $SOURCE_BUCKET"
-aws s3 rm "s3://$SOURCE_BUCKET/" --recursive 2>/dev/null
-aws s3 cp "$SOURCE_DIR" "s3://$SOURCE_BUCKET/" --recursive --exclude "*" --include "*.zip" 2>/dev/null
+aws s3 rm "s3://$SOURCE_BUCKET/" --recursive
+aws s3 cp "$SOURCE_DIR" "s3://$SOURCE_BUCKET/" --recursive --exclude "*" --include "*.zip"
 
 # Delete files from zip bucket
 echo "Cleaning up..."
@@ -151,9 +157,11 @@ rmdir "$SOURCE_DIR"
 
 echo "-----"
 echo "Storing generated bucket names in SSM parameter store..."
+
 # Save the bucket names to SSM parameter store for future reference
-aws ssm put-parameter --name "aria-source-bucket" --value "$SOURCE_BUCKET" --type "String" --overwrite > /dev/null
-aws ssm put-parameter --name "aria-export-bucket" --value "$EXPORT_BUCKET" --type "String" --overwrite > /dev/null
+aws ssm put-parameter --name "aria-source-bucket" --value "$SOURCE_BUCKET" --type "String" --region "$REGION" --overwrite > /dev/null
+aws ssm put-parameter --name "aria-export-bucket" --value "$EXPORT_BUCKET" --type "String" --region "$REGION" --overwrite > /dev/null
+
 echo "Source Bucket: $SOURCE_BUCKET"
 echo "Export Bucket: $EXPORT_BUCKET"
 echo "-----"
